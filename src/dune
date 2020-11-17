@@ -1,0 +1,16 @@
+(rule
+ (targets libblake3.a dllblake3.so)
+ (deps (glob_files *.rs))
+ (action
+  (progn
+   (run cargo build --target-dir %{project_root}/../../target --release)
+   (run sh -c
+     "mv %{project_root}/../../target/release/libblake3.so ./dllblake3.so 2> /dev/null || \
+      mv %{project_root}/../../target/release/libblake3.dylib ./dllblake3.so")
+   (run mv %{project_root}/../../target/release/libblake3.a libblake3.a))))
+
+(library
+ (name blake3)
+ (foreign_archives blake3)
+ (c_library_flags
+  (-lpthread -lc -lm)))
