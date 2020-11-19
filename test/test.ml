@@ -9,5 +9,12 @@ let hex_string bs =
   |> String.concat ""
 
 let () =
-  let h = Blake3.hash "Hello" in
-  assert ("fbc2b0516ee8744d293b980779178a3508850fdcfe965985782c39601b65794f" = hex_string h)
+  let h = Blake3.hash "Hello\n" in
+  let expected =
+    (*
+       $ echo Hello | b3sum -
+       38d5445421bfd60d4d48ff2a7acb3ed412e43e68e66cdb2bb86f604ec6e6caa0  -
+    *)
+    "38d5445421bfd60d4d48ff2a7acb3ed412e43e68e66cdb2bb86f604ec6e6caa0"
+  in
+  assert (expected = hex_string h)
