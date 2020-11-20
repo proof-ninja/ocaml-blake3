@@ -9,4 +9,4 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 ocaml = "*"
-blake3 = "0.3.7"
+blake3 = { version = "0.3.7", features = ["rayon"] }
