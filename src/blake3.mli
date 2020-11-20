@@ -1,1 +1,1 @@
-val hash: string -> string
+val hash: int -> string -> string

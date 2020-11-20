@@ -1,4 +1,7 @@
 #[ocaml::func]
-pub unsafe fn blake3_hash(input: &[u8]) -> String {
-    return String::from_utf8_unchecked (blake3::hash(input).as_bytes().to_vec());
+pub fn blake3_hash(input: &[u8], output: &mut [u8]) -> () {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(input);
+    let mut output_reader = hasher.finalize_xof();
+    output_reader.fill(output);
 }
