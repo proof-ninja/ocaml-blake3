@@ -1,5 +1,5 @@
 [package]
-name = "blake3"
+name = "ocaml-blake3"
 version = "0.1.0"
 authors = ["Yoshihiro Imai <y.imai@proof-ninja.co.jp>"]
 edition = "2018"
