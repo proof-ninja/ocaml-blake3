@@ -1,9 +1,10 @@
 (executables
- (libraries blake3)
+ (libraries blake3 ptime.clock.os hacl-star)
  (names test)
  (modules test))
 
 (rule
  (alias runtest)
+ (deps (:testfile1 ./1M.dummy) (:testfile2 ./1G.dummy))
  (action
   (run ./test.exe)))
