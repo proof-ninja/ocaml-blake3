@@ -23,6 +23,15 @@ let hex_string bs =
   |> List.map (Printf.sprintf "%02x")
   |> String.concat ""
 
+(* expected result *)
+let b3sum filename =
+  let command = "b3sum " ^ filename in
+  let ch = Unix.open_process_in command in
+  let result = input_line ch in
+  ignore (Unix.close_process_in ch);
+  String.split_on_char ' ' result
+  |> List.hd
+
 let small_test () =
   let h = Blake3.hash hash_size "Hello\n" in
   let expected =
@@ -43,12 +52,13 @@ let blake2 hash_size s =
   Bytes.unsafe_to_string outbuf
 
 
-let test_using_file expected_hash filename =
+let test_using_file filename =
   let ((), time) = with_time @@ fun () ->
     let bytes = load_file filename in
     let actual = hex_string @@ Blake3.hash hash_size bytes in
+    let expected_hash = b3sum filename in
     if expected_hash <> actual then begin
-      Printf.eprintf "---\nexpected: %s\n actual:   %s\n" expected_hash actual;
+      Printf.eprintf "---\nexpected: %s\nactual:   %s\n" expected_hash actual;
       assert false
     end
   in
@@ -76,10 +86,9 @@ let measure () =
   done;
   Printf.printf "small data: Blake3 %f, Blake2 %f\n" !time_blake3 !time_blake2
 
-
 let () =
   small_test ();
-  test_using_file "488de202f73bd976de4e7048f4e1f39a776d86d582b7348ff53bf432b987fca8" "1M.dummy";
-  test_using_file "7ebdce605f77d5e713a8eeb0e46ace177a27af851c6508730d52255c01b8af0d" "1G.dummy";
+  test_using_file "1M.dummy";
+  test_using_file "1G.dummy";
   measure ();
   ()
