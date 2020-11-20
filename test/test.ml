@@ -48,23 +48,26 @@ let blake2 hash_size s =
   let key = Bytes.create 0 in
   let inbuf = Bytes.unsafe_of_string s in
   let outbuf = Bytes.create hash_size in
-  Hacl.Blake2b_32.hash key inbuf outbuf;
-  Bytes.unsafe_to_string outbuf
+  let ((), time) = with_time @@ fun () -> Hacl.Blake2b_32.hash key inbuf outbuf in
+  (Bytes.unsafe_to_string outbuf, time)
 
 
 let test_using_file filename =
-  let ((), time) = with_time @@ fun () ->
+  let time =
     let bytes = load_file filename in
-    let actual = hex_string @@ Blake3.hash hash_size bytes in
+    let hash, time = with_time @@ fun () -> Blake3.hash hash_size bytes in
+    let actual = hex_string hash in
     let expected_hash = b3sum filename in
     if expected_hash <> actual then begin
       Printf.eprintf "---\nexpected: %s\nactual:   %s\n" expected_hash actual;
       assert false
-    end
+    end;
+    time
   in
-  let (_, time2) = with_time @@ fun () ->
+  let time2 =
     let bytes = load_file filename in
-    blake2 hash_size bytes
+    let (_, time) = blake2 hash_size bytes in
+    time
   in
   Printf.printf "Testing with the file '%s' done: time: %f, (hacl_blake2: %f)\n"
     filename time time2
@@ -80,7 +83,7 @@ let measure () =
   for _i = 1 to 1000000 do
     let input = gen_string st 60 in
     let (_out1, time1) = with_time @@ fun () -> Blake3.hash small_hash input in
-    let (_out2, time2) = with_time @@ fun () -> blake2 small_hash input in
+    let (_out2, time2) = blake2 small_hash input in
     time_blake3 := time1 +. !time_blake3;
     time_blake2 := time2 +. !time_blake2;
   done;
