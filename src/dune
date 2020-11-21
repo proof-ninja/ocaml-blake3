@@ -1,6 +1,7 @@
 (rule
  (targets libocaml_blake3.a dllocaml_blake3.so)
- (deps (glob_files *.rs))
+ (deps (glob_files *.rs) ../Cargo.toml ../Cargo.lock ../cargo-config
+   (source_tree ../vendor))
  (action
   (progn
    (run cargo build --target-dir %{project_root}/../../target --release)
