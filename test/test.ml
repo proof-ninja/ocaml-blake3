@@ -1,10 +1,10 @@
 let hash_size = 32
 
 let with_time f =
-  let t1 = Ptime_clock.now () in
+  let t1 = Unix.gettimeofday () in
   let res = f () in
-  let t2 = Ptime_clock.now () in
-  res, (Ptime.Span.to_float_s @@ Ptime.diff t2 t1)
+  let t2 = Unix.gettimeofday () in
+  res, (t2 -. t1)
 
 let load_file filename =
   let ch = open_in_bin filename in
@@ -48,50 +48,48 @@ let blake2 hash_size s =
   let key = Bytes.create 0 in
   let inbuf = Bytes.unsafe_of_string s in
   let outbuf = Bytes.create hash_size in
-  let ((), time) = with_time @@ fun () -> Hacl.Blake2b_32.hash key inbuf outbuf in
-  (Bytes.unsafe_to_string outbuf, time)
+  Hacl.Blake2b_32.hash key inbuf outbuf;
+  Bytes.unsafe_to_string outbuf
 
+(* compare with b3sum *)
+let file_test () =
+  let open Unix in
+  let fn = Filename.temp_file "random" "data" in
+  let bytes = Bytes.create 1000000000 (* 1GiB *) in
+  let fd = openfile fn [O_CREAT; O_RDWR] 0o666 in
+  ignore @@ write fd bytes 0 1000000000;
+  close fd;
+  let string = Bytes.unsafe_to_string @@ Bytes.create 1000000000 (* 1GiB *) in
+  let h1, time1 = with_time @@ fun () -> Blake3.hash_multicore 32 string in
+  let hex1 = hex_string h1 in
+  let hex2, time2 = with_time @@ fun () -> b3sum fn in
+  if hex2 <> hex1 then begin
+    Printf.eprintf "---\nexpected: %s\nactual:   %s\n" hex2 hex1;
+    assert false
+  end;
+  Printf.printf "1GiB hash: blake3_multicore %f b3sum %f\n%!"
+    time1 time2
 
-let test_using_file filename =
-  let time =
-    let bytes = load_file filename in
-    let hash, time = with_time @@ fun () -> Blake3.hash hash_size bytes in
-    let actual = hex_string hash in
-    let expected_hash = b3sum filename in
-    if expected_hash <> actual then begin
-      Printf.eprintf "---\nexpected: %s\nactual:   %s\n" expected_hash actual;
-      assert false
-    end;
-    time
-  in
-  let time2 =
-    let bytes = load_file filename in
-    let (_, time) = blake2 hash_size bytes in
-    time
-  in
-  Printf.printf "Testing with the file '%s' done: time: %f, (hacl_blake2: %f)\n"
-    filename time time2
-
-let measure () =
-  let module RS = Random.State in
-  let small_hash = 28 in
-  let gen_string st len =
-    String.init len (fun _i -> char_of_int @@ RS.int st 256)
-  in
-  let st = RS.make_self_init () in
-  let time_blake3, time_blake2 = ref 0., ref 0. in
-  for _i = 1 to 1000000 do
-    let input = gen_string st 60 in
-    let (_out1, time1) = with_time @@ fun () -> Blake3.hash small_hash input in
-    let (_out2, time2) = blake2 small_hash input in
-    time_blake3 := time1 +. !time_blake3;
-    time_blake2 := time2 +. !time_blake2;
-  done;
-  Printf.printf "small data: Blake3 %f, Blake2 %f\n" !time_blake3 !time_blake2
+let measure inputsz outputsz =
+  let string = Bytes.unsafe_to_string @@ Bytes.create 4294967296 in
+  let size = min 100000 (max 1 (1000000 * 60 / inputsz)) in
+  let inputs = List.init size (fun i -> String.sub string i inputsz) in
+  let _, time_b3m = with_time @@ fun () -> List.iter (fun s -> ignore @@ Blake3.hash_multicore outputsz s) inputs in
+  let _, time_b3s = with_time @@ fun () -> List.iter (fun s -> ignore @@ Blake3.hash outputsz s) inputs in
+  let _, time_b2 = with_time @@ fun () -> List.iter (fun s -> ignore @@ blake2 outputsz s) inputs in
+  Format.printf "%d, %d, %f, %f, %f, %d@."
+    inputsz outputsz
+    (time_b3m *. 1000000.0 /. float size)
+    (time_b3s *. 1000000.0 /. float size)
+    (time_b2  *. 1000000.0 /. float size)
+    size
 
 let () =
   small_test ();
-  test_using_file "1M.dummy";
-  test_using_file "1G.dummy";
-  measure ();
-  ()
+  file_test ();
+  Printf.printf "input-bytes, output-bytes, blake3multi-microsecs, blake3single-microsecs, blake2-microsecs, iteration\n%!";
+
+  measure 60 28;
+  measure 60 32;
+  List.iter (fun inputsz -> measure inputsz 32)
+    (List.init 24 (fun x -> 256 * (1 lsl x)))
