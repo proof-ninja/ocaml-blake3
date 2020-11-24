@@ -4,7 +4,7 @@ authors: ["foobar"]
 homepage: "https://github.com/proof-ninja/ocaml-blake3"
 bug-reports: "https://github.com/proof-ninja/ocaml-blake3/issues"
 dev-repo: "git+https://github.com/proof-ninja/ocaml-blake3.git"
-license: "foobar"
+license: "MIT LICENSE"
 
 depends: [
     "ocaml" {>= "4.09.1"}
