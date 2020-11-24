@@ -1,20 +1,9 @@
 (executables
- (libraries blake3 ptime.clock.os hacl-star)
+ (libraries blake3 hacl-star)
  (names test)
  (modules test))
 
 (rule
- (target 1G.dummy)
- (action
-  (run dd if=/dev/urandom of=1G.dummy bs=1M count=1000)))
-
-(rule
- (target 1M.dummy)
- (action
-  (run dd if=/dev/urandom of=1M.dummy bs=1M count=1)))
-
-(rule
  (alias runtest)
- (deps (:testfile1 ./1M.dummy) (:testfile2 ./1G.dummy))
  (action
   (run ./test.exe)))
