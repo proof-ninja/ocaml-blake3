@@ -1,3 +1,3 @@
-val hash: int -> string -> string
+val hash: int -> bytes -> bytes
 
-val hash_multicore: int -> string -> string
+val hash_multicore: int -> bytes -> bytes

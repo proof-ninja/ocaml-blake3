@@ -1,5 +1,7 @@
 let hash_size = 32
 
+let b = Bytes.of_string
+
 let with_time f =
   let t1 = Unix.gettimeofday () in
   let res = f () in
@@ -11,12 +13,12 @@ let load_file filename =
   let size = in_channel_length ch in
   let body = really_input_string ch size in
   close_in ch;
-  body
+  Bytes.of_string body
 
 let hex_string bs =
   let list_of_bytes bs =
-    let len = String.length bs in
-    List.init len (fun i -> String.get bs i)
+    let len = Bytes.length bs in
+    List.init len (fun i -> Bytes.get bs i)
   in
   list_of_bytes bs
   |> List.map int_of_char
@@ -33,7 +35,7 @@ let b3sum filename =
   |> List.hd
 
 let small_test () =
-  let h = Blake3.hash hash_size "Hello\n" in
+  let h = Blake3.hash hash_size @@ b"Hello\n" in
   let expected =
     (*
        $ echo Hello | b3sum -
@@ -43,10 +45,9 @@ let small_test () =
   in
   assert (expected = hex_string h)
 
-let blake2 hash_size s =
+let blake2 hash_size inbuf =
   let open Hacl_star in
   let key = Bytes.create 0 in
-  let inbuf = Bytes.unsafe_of_string s in
   let outbuf = Bytes.create hash_size in
   Hacl.Blake2b_32.hash key inbuf outbuf;
   Bytes.unsafe_to_string outbuf
@@ -59,8 +60,8 @@ let file_test () =
   let fd = openfile fn [O_CREAT; O_RDWR] 0o666 in
   ignore @@ write fd bytes 0 1000000000;
   close fd;
-  let string = Bytes.unsafe_to_string @@ Bytes.create 1000000000 (* 1GiB *) in
-  let h1, time1 = with_time @@ fun () -> Blake3.hash_multicore 32 string in
+  let bytes = Bytes.create 1000000000 (* 1GiB *) in
+  let h1, time1 = with_time @@ fun () -> Blake3.hash_multicore 32 bytes in
   let hex1 = hex_string h1 in
   let hex2, time2 = with_time @@ fun () -> b3sum fn in
   if hex2 <> hex1 then begin
@@ -71,9 +72,9 @@ let file_test () =
     time1 time2
 
 let measure inputsz outputsz =
-  let string = Bytes.unsafe_to_string @@ Bytes.create 4294967296 in
+  let bytes = Bytes.create 4294967296 in
   let size = min 100000 (max 1 (1000000 * 60 / inputsz)) in
-  let inputs = List.init size (fun i -> String.sub string i inputsz) in
+  let inputs = List.init size (fun i -> Bytes.sub bytes i inputsz) in
   let _, time_b3m = with_time @@ fun () -> List.iter (fun s -> ignore @@ Blake3.hash_multicore outputsz s) inputs in
   let _, time_b3s = with_time @@ fun () -> List.iter (fun s -> ignore @@ Blake3.hash outputsz s) inputs in
   let _, time_b2 = with_time @@ fun () -> List.iter (fun s -> ignore @@ blake2 outputsz s) inputs in
