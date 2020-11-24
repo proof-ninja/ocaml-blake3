@@ -12,6 +12,7 @@ depends: [
     "ocaml" {>= "4.09.1"}
     "dune"
     "conf-rust" {build}
+    "hacl-star" {with-test}
 ]
 
 build: [
