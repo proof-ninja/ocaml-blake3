@@ -1,9 +1,4 @@
-(executables
- (libraries blake3 hacl-star)
+(tests
  (names test)
- (modules test))
-
-(rule
- (alias runtest)
- (action
-  (run ./test.exe)))
+ (modes exe)
+ (libraries blake3 hacl-star))
