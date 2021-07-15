@@ -4,6 +4,8 @@
    (source_tree ../vendor))
  (action
   (progn
+   (run sh -c "mkdir ../.cargo")
+   (run sh -c "cp ../cargo-config ../.cargo/config")
    (run cargo build --target-dir %{project_root}/../../_build_rust --release)
    (run sh -c
      "mv %{project_root}/../../_build_rust/release/libocaml_blake3.so ./dllocaml_blake3.so 2> /dev/null || \
