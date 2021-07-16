@@ -1,6 +1,6 @@
 opam-version: "2.0"
 name: "blake3"
-version: "0.1"
+version: "0.2"
 maintainer: "Yoshihiro Imai <y.imai@proof-ninja.co.jp>"
 authors: ["Yoshihiro Imai <y.imai@proof-ninja.co.jp>" "Jun Furuse <jun.furuse@dailambda.jp>"]
 homepage: "https://github.com/proof-ninja/ocaml-blake3"
