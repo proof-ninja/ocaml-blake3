@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "blake3"
-version = "0.3.7"
+version = "0.3.8"
 authors = ["Jack O'Connor <oconnor663@gmail.com>"]
 description = "the BLAKE3 hash function"
 documentation = "https://docs.rs/blake3"

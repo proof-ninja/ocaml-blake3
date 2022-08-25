@@ -139,6 +139,6 @@ fn run() -> std::io::Result<()> {
 }
 
 fn main() {
-    #[cfg(not(feature = "docs-rs"))]
-    let _ = run();
+    #[cfg(not(feature = "without-ocamlopt"))]
+    run().unwrap()
 }

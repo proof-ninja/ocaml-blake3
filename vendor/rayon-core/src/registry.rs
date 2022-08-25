@@ -4,7 +4,6 @@ use crate::log::Event::*;
 use crate::log::Logger;
 use crate::sleep::Sleep;
 use crate::unwind;
-use crate::util::leak;
 use crate::{
     ErrorKind, ExitHandler, PanicHandler, StartHandler, ThreadPoolBuildError, ThreadPoolBuilder,
 };
@@ -159,15 +158,15 @@ pub(super) struct Registry {
 /// ////////////////////////////////////////////////////////////////////////
 /// Initialization
 
-static mut THE_REGISTRY: Option<&'static Arc<Registry>> = None;
+static mut THE_REGISTRY: Option<Arc<Registry>> = None;
 static THE_REGISTRY_SET: Once = Once::new();
 
 /// Starts the worker threads (if that has not already happened). If
 /// initialization has not already occurred, use the default
 /// configuration.
-fn global_registry() -> &'static Arc<Registry> {
+pub(super) fn global_registry() -> &'static Arc<Registry> {
     set_global_registry(|| Registry::new(ThreadPoolBuilder::new()))
-        .or_else(|err| unsafe { THE_REGISTRY.ok_or(err) })
+        .or_else(|err| unsafe { THE_REGISTRY.as_ref().ok_or(err) })
         .expect("The global thread pool has not been initialized.")
 }
 
@@ -191,15 +190,12 @@ where
     let mut result = Err(ThreadPoolBuildError::new(
         ErrorKind::GlobalPoolAlreadyInitialized,
     ));
+
     THE_REGISTRY_SET.call_once(|| {
-        result = registry().map(|registry| {
-            let registry = leak(registry);
-            unsafe {
-                THE_REGISTRY = Some(registry);
-            }
-            registry
-        });
+        result = registry()
+            .map(|registry: Arc<Registry>| unsafe { &*THE_REGISTRY.get_or_insert(registry) })
     });
+
     result
 }
 
@@ -218,7 +214,9 @@ impl Registry {
     where
         S: ThreadSpawn,
     {
-        let n_threads = builder.get_num_threads();
+        // Soft-limit the number of threads that we can actually support.
+        let n_threads = Ord::min(builder.get_num_threads(), crate::max_num_threads());
+
         let breadth_first = builder.get_breadth_first();
 
         let (workers, stealers): (Vec<_>, Vec<_>) = (0..n_threads)
@@ -253,7 +251,7 @@ impl Registry {
             let thread = ThreadBuilder {
                 name: builder.get_thread_name(index),
                 stack_size: builder.get_stack_size(),
-                registry: registry.clone(),
+                registry: Arc::clone(&registry),
                 worker,
                 index,
             };
@@ -265,17 +263,18 @@ impl Registry {
         // Returning normally now, without termination.
         mem::forget(t1000);
 
-        Ok(registry.clone())
+        Ok(registry)
     }
 
     pub(super) fn current() -> Arc<Registry> {
         unsafe {
             let worker_thread = WorkerThread::current();
-            if worker_thread.is_null() {
-                global_registry().clone()
+            let registry = if worker_thread.is_null() {
+                global_registry()
             } else {
-                (*worker_thread).registry.clone()
-            }
+                &(*worker_thread).registry
+            };
+            Arc::clone(registry)
         }
     }
 
@@ -806,9 +805,10 @@ unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usiz
         fifo: JobFifo::new(),
         index,
         rng: XorShift64Star::new(),
-        registry: registry.clone(),
+        registry,
     };
     WorkerThread::set_current(worker_thread);
+    let registry = &*worker_thread.registry;
 
     // let registry know we are ready to do work
     registry.thread_infos[index].primed.set();
@@ -820,7 +820,6 @@ unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usiz
 
     // Inform a user callback that we started a thread.
     if let Some(ref handler) = registry.start_handler {
-        let registry = registry.clone();
         match unwind::halt_unwinding(|| handler(index)) {
             Ok(()) => {}
             Err(err) => {
@@ -849,7 +848,6 @@ unsafe fn main_loop(worker: Worker<JobRef>, registry: Arc<Registry>, index: usiz
 
     // Inform a user callback that we exited a thread.
     if let Some(ref handler) = registry.exit_handler {
-        let registry = registry.clone();
         match unwind::halt_unwinding(|| handler(index)) {
             Ok(()) => {}
             Err(err) => {

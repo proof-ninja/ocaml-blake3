@@ -46,6 +46,7 @@ use crate::internal::Local;
 /// if let Some(num) = unsafe { p.as_ref() } {
 ///     println!("The number is {}.", num);
 /// }
+/// # unsafe { drop(a.into_owned()); } // avoid leak
 /// ```
 ///
 /// # Multiple guards
@@ -184,6 +185,7 @@ impl Guard {
     ///         });
     ///     }
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub unsafe fn defer_unchecked<F, R>(&self, f: F)
     where
@@ -263,6 +265,7 @@ impl Guard {
     ///         guard.defer_destroy(p);
     ///     }
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub unsafe fn defer_destroy<T>(&self, ptr: Shared<'_, T>) {
         self.defer_unchecked(move || ptr.into_owned());
@@ -320,6 +323,7 @@ impl Guard {
     ///     let p = a.load(SeqCst, &guard);
     ///     assert_eq!(unsafe { p.as_ref() }, Some(&777));
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn repin(&mut self) {
         if let Some(local) = unsafe { self.local.as_ref() } {
@@ -356,6 +360,7 @@ impl Guard {
     ///     let p = a.load(SeqCst, &guard);
     ///     assert_eq!(unsafe { p.as_ref() }, Some(&777));
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn repin_after<F, R>(&mut self, f: F) -> R
     where
@@ -451,6 +456,7 @@ impl fmt::Debug for Guard {
 ///
 ///     // Dropping `dummy` doesn't affect the current thread - it's just a noop.
 /// }
+/// # unsafe { drop(a.into_owned()); } // avoid leak
 /// ```
 ///
 /// The most common use of this function is when constructing or destructing a data structure.
@@ -502,12 +508,13 @@ impl fmt::Debug for Guard {
 /// [`defer`]: Guard::defer
 #[inline]
 pub unsafe fn unprotected() -> &'static Guard {
-    // HACK(stjepang): An unprotected guard is just a `Guard` with its field `local` set to null.
-    // Since this function returns a `'static` reference to a `Guard`, we must return a reference
-    // to a global guard. However, it's not possible to create a `static` `Guard` because it does
-    // not implement `Sync`. To get around the problem, we create a static `usize` initialized to
-    // zero and then transmute it into a `Guard`. This is safe because `usize` and `Guard`
-    // (consisting of a single pointer) have the same representation in memory.
-    static UNPROTECTED: usize = 0;
-    &*(&UNPROTECTED as *const _ as *const Guard)
+    // An unprotected guard is just a `Guard` with its field `local` set to null.
+    // We make a newtype over `Guard` because `Guard` isn't `Sync`, so can't be directly stored in
+    // a `static`
+    struct GuardWrapper(Guard);
+    unsafe impl Sync for GuardWrapper {}
+    static UNPROTECTED: GuardWrapper = GuardWrapper(Guard {
+        local: core::ptr::null(),
+    });
+    &UNPROTECTED.0
 }

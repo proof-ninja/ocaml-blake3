@@ -189,19 +189,21 @@ impl<'r> Latch for SpinLatch<'r> {
     fn set(&self) {
         let cross_registry;
 
-        let registry = if self.cross {
+        let registry: &Registry = if self.cross {
             // Ensure the registry stays alive while we notify it.
             // Otherwise, it would be possible that we set the spin
             // latch and the other thread sees it and exits, causing
             // the registry to be deallocated, all before we get a
             // chance to invoke `registry.notify_worker_latch_is_set`.
             cross_registry = Arc::clone(self.registry);
-            &cross_registry
+            &*cross_registry
         } else {
             // If this is not a "cross-registry" spin-latch, then the
             // thread which is performing `set` is itself ensuring
-            // that the registry stays alive.
-            self.registry
+            // that the registry stays alive. However, that doesn't
+            // include this *particular* `Arc` handle if the waiting
+            // thread then exits, so we must completely dereference it.
+            &**self.registry
         };
         let target_worker_index = self.target_worker_index;
 
@@ -218,6 +220,7 @@ impl<'r> Latch for SpinLatch<'r> {
 
 /// A Latch starts as false and eventually becomes true. You can block
 /// until it becomes true.
+#[derive(Debug)]
 pub(super) struct LockLatch {
     m: Mutex<bool>,
     v: Condvar,
@@ -297,11 +300,9 @@ impl CountLatch {
 
     /// Decrements the latch counter by one. If this is the final
     /// count, then the latch is **set**, and calls to `probe()` will
-    /// return true. Returns whether the latch was set. This is an
-    /// internal operation, as it does not tickle, and to fail to
-    /// tickle would lead to deadlock.
+    /// return true. Returns whether the latch was set.
     #[inline]
-    fn set(&self) -> bool {
+    pub(super) fn set(&self) -> bool {
         if self.counter.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.core_latch.set();
             true
@@ -325,6 +326,41 @@ impl AsCoreLatch for CountLatch {
     #[inline]
     fn as_core_latch(&self) -> &CoreLatch {
         &self.core_latch
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct CountLockLatch {
+    lock_latch: LockLatch,
+    counter: AtomicUsize,
+}
+
+impl CountLockLatch {
+    #[inline]
+    pub(super) fn new() -> CountLockLatch {
+        CountLockLatch {
+            lock_latch: LockLatch::new(),
+            counter: AtomicUsize::new(1),
+        }
+    }
+
+    #[inline]
+    pub(super) fn increment(&self) {
+        let old_counter = self.counter.fetch_add(1, Ordering::Relaxed);
+        debug_assert!(old_counter != 0);
+    }
+
+    pub(super) fn wait(&self) {
+        self.lock_latch.wait();
+    }
+}
+
+impl Latch for CountLockLatch {
+    #[inline]
+    fn set(&self) {
+        if self.counter.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.lock_latch.set();
+        }
     }
 }
 

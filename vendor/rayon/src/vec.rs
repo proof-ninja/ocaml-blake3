@@ -8,11 +8,30 @@
 use crate::iter::plumbing::*;
 use crate::iter::*;
 use crate::math::simplify_range;
+use crate::slice::{Iter, IterMut};
 use std::iter;
 use std::mem;
 use std::ops::{Range, RangeBounds};
 use std::ptr;
 use std::slice;
+
+impl<'data, T: Sync + 'data> IntoParallelIterator for &'data Vec<T> {
+    type Item = &'data T;
+    type Iter = Iter<'data, T>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        <&[T]>::into_par_iter(self)
+    }
+}
+
+impl<'data, T: Send + 'data> IntoParallelIterator for &'data mut Vec<T> {
+    type Item = &'data mut T;
+    type Iter = IterMut<'data, T>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        <&mut [T]>::into_par_iter(self)
+    }
+}
 
 /// Parallel iterator that moves out of a vector.
 #[derive(Debug, Clone)]
@@ -113,21 +132,19 @@ impl<'data, T: Send> IndexedParallelIterator for Drain<'data, T> {
         self.range.len()
     }
 
-    fn with_producer<CB>(self, callback: CB) -> CB::Output
+    fn with_producer<CB>(mut self, callback: CB) -> CB::Output
     where
         CB: ProducerCallback<Self::Item>,
     {
         unsafe {
             // Make the vector forget about the drained items, and temporarily the tail too.
-            let start = self.range.start;
-            self.vec.set_len(start);
+            self.vec.set_len(self.range.start);
 
-            // Get a correct borrow lifetime, then extend it to the original length.
-            let mut slice = &mut self.vec[start..];
-            slice = slice::from_raw_parts_mut(slice.as_mut_ptr(), self.range.len());
+            // Create the producer as the exclusive "owner" of the slice.
+            let producer = DrainProducer::from_vec(&mut self.vec, self.range.len());
 
             // The producer will move or drop each item from the drained range.
-            callback.callback(DrainProducer::new(slice))
+            callback.callback(producer)
         }
     }
 }
@@ -161,12 +178,26 @@ pub(crate) struct DrainProducer<'data, T: Send> {
     slice: &'data mut [T],
 }
 
-impl<'data, T: 'data + Send> DrainProducer<'data, T> {
+impl<T: Send> DrainProducer<'_, T> {
     /// Creates a draining producer, which *moves* items from the slice.
     ///
     /// Unsafe bacause `!Copy` data must not be read after the borrow is released.
-    pub(crate) unsafe fn new(slice: &'data mut [T]) -> Self {
+    pub(crate) unsafe fn new(slice: &mut [T]) -> DrainProducer<'_, T> {
         DrainProducer { slice }
+    }
+
+    /// Creates a draining producer, which *moves* items from the tail of the vector.
+    ///
+    /// Unsafe because we're moving from beyond `vec.len()`, so the caller must ensure
+    /// that data is initialized and not read after the borrow is released.
+    unsafe fn from_vec(vec: &mut Vec<T>, len: usize) -> DrainProducer<'_, T> {
+        let start = vec.len();
+        assert!(vec.capacity() - start >= len);
+
+        // The pointer is derived from `Vec` directly, not through a `Deref`,
+        // so it has provenance over the whole allocation.
+        let ptr = vec.as_mut_ptr().add(start);
+        DrainProducer::new(slice::from_raw_parts_mut(ptr, len))
     }
 }
 
@@ -208,7 +239,9 @@ impl<'data, T: 'data> Iterator for SliceDrain<'data, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        let ptr = self.iter.next()?;
+        // Coerce the pointer early, so we don't keep the
+        // reference that's about to be invalidated.
+        let ptr: *const T = self.iter.next()?;
         Some(unsafe { ptr::read(ptr) })
     }
 
@@ -223,7 +256,9 @@ impl<'data, T: 'data> Iterator for SliceDrain<'data, T> {
 
 impl<'data, T: 'data> DoubleEndedIterator for SliceDrain<'data, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        let ptr = self.iter.next_back()?;
+        // Coerce the pointer early, so we don't keep the
+        // reference that's about to be invalidated.
+        let ptr: *const T = self.iter.next_back()?;
         Some(unsafe { ptr::read(ptr) })
     }
 }

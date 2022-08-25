@@ -1,3 +1,5 @@
+#![allow(clippy::manual_assert)]
+
 mod progress;
 
 use self::progress::Progress;
@@ -8,29 +10,78 @@ use std::path::Path;
 use tar::Archive;
 use walkdir::DirEntry;
 
-const REVISION: &str = "792c645ca7d11a8d254df307d019c5bf01445c37";
+const REVISION: &str = "ee160f2f5e73b6f5954bc33f059c316d9e8582c4";
 
 #[rustfmt::skip]
 static EXCLUDE: &[&str] = &[
+    // TODO: impl ~const T {}
+    // https://github.com/dtolnay/syn/issues/1051
+    "src/test/ui/rfc-2632-const-trait-impl/syntax.rs",
+
     // Compile-fail expr parameter in const generic position: f::<1 + 2>()
-    "test/ui/const-generics/const-expression-parameter.rs",
+    "src/test/ui/const-generics/early/closing-args-token.rs",
+    "src/test/ui/const-generics/early/const-expression-parameter.rs",
+
+    // Need at least one trait in impl Trait, no such type as impl 'static
+    "src/test/ui/type-alias-impl-trait/generic_type_does_not_live_long_enough.rs",
 
     // Deprecated anonymous parameter syntax in traits
-    "test/ui/issues/issue-13105.rs",
-    "test/ui/issues/issue-13775.rs",
-    "test/ui/issues/issue-34074.rs",
-    "test/ui/proc-macro/trait-fn-args-2015.rs",
+    "src/test/ui/issues/issue-13105.rs",
+    "src/test/ui/issues/issue-13775.rs",
+    "src/test/ui/issues/issue-34074.rs",
+    "src/test/ui/proc-macro/trait-fn-args-2015.rs",
+    "src/tools/rustfmt/tests/source/trait.rs",
+    "src/tools/rustfmt/tests/target/trait.rs",
+
+    // Placeholder syntax for "throw expressions"
+    "src/test/pretty/yeet-expr.rs",
+    "src/test/ui/try-trait/yeet-for-option.rs",
+    "src/test/ui/try-trait/yeet-for-result.rs",
+
+    // Excessive nesting
+    "src/test/ui/issues/issue-74564-if-expr-stack-overflow.rs",
+
+    // Testing rustfmt on invalid syntax
+    "src/tools/rustfmt/tests/coverage/target/comments.rs",
+    "src/tools/rustfmt/tests/parser/issue-4126/invalid.rs",
+    "src/tools/rustfmt/tests/parser/issue_4418.rs",
+    "src/tools/rustfmt/tests/parser/unclosed-delims/issue_4466.rs",
+    "src/tools/rustfmt/tests/source/configs/disable_all_formatting/true.rs",
+    "src/tools/rustfmt/tests/source/configs/spaces_around_ranges/false.rs",
+    "src/tools/rustfmt/tests/source/configs/spaces_around_ranges/true.rs",
+    "src/tools/rustfmt/tests/source/type.rs",
+    "src/tools/rustfmt/tests/target/configs/spaces_around_ranges/false.rs",
+    "src/tools/rustfmt/tests/target/configs/spaces_around_ranges/true.rs",
+    "src/tools/rustfmt/tests/target/type.rs",
+
+    // Testing compiler diagnostic localization on invalid syntax
+    "src/test/run-make/translation/basic-translation.rs",
+
+    // Clippy lint lists represented as expressions
+    "src/tools/clippy/clippy_lints/src/lib.deprecated.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_all.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_cargo.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_complexity.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_correctness.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_internal.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_lints.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_nursery.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_pedantic.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_perf.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_restriction.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_style.rs",
+    "src/tools/clippy/clippy_lints/src/lib.register_suspicious.rs",
 
     // Not actually test cases
-    "test/rustdoc-ui/test-compile-fail2.rs",
-    "test/rustdoc-ui/test-compile-fail3.rs",
-    "test/ui/include-single-expr-helper.rs",
-    "test/ui/include-single-expr-helper-1.rs",
-    "test/ui/issues/auxiliary/issue-21146-inc.rs",
-    "test/ui/json-bom-plus-crlf-multifile-aux.rs",
-    "test/ui/lint/expansion-time-include.rs",
-    "test/ui/macros/auxiliary/macro-comma-support.rs",
-    "test/ui/macros/auxiliary/macro-include-items-expr.rs",
+    "src/test/rustdoc-ui/test-compile-fail2.rs",
+    "src/test/rustdoc-ui/test-compile-fail3.rs",
+    "src/test/ui/json-bom-plus-crlf-multifile-aux.rs",
+    "src/test/ui/lint/expansion-time-include.rs",
+    "src/test/ui/macros/auxiliary/macro-comma-support.rs",
+    "src/test/ui/macros/auxiliary/macro-include-items-expr.rs",
+    "src/test/ui/macros/include-single-expr-helper.rs",
+    "src/test/ui/macros/include-single-expr-helper-1.rs",
+    "src/test/ui/parser/issues/auxiliary/issue-21146-inc.rs",
 ];
 
 pub fn base_dir_filter(entry: &DirEntry) -> bool {
@@ -38,7 +89,7 @@ pub fn base_dir_filter(entry: &DirEntry) -> bool {
     if path.is_dir() {
         return true; // otherwise walkdir does not visit the files
     }
-    if path.extension().map(|e| e != "rs").unwrap_or(true) {
+    if path.extension().map_or(true, |e| e != "rs") {
         return false;
     }
 
@@ -46,23 +97,17 @@ pub fn base_dir_filter(entry: &DirEntry) -> bool {
     if cfg!(windows) {
         path_string = path_string.replace('\\', "/").into();
     }
-    let path = if let Some(path) = path_string.strip_prefix("tests/rust/src/") {
-        path
-    } else if let Some(path) = path_string.strip_prefix("tests/rust/library/") {
+    let path = if let Some(path) = path_string.strip_prefix("tests/rust/") {
         path
     } else {
         panic!("unexpected path in Rust dist: {}", path_string);
     };
 
-    // TODO assert that parsing fails on the parse-fail cases
-    if path.starts_with("test/parse-fail")
-        || path.starts_with("test/compile-fail")
-        || path.starts_with("test/rustfix")
-    {
+    if path.starts_with("src/test/compile-fail") || path.starts_with("src/test/rustfix") {
         return false;
     }
 
-    if path.starts_with("test/ui") {
+    if path.starts_with("src/test/ui") {
         let stderr_path = entry.path().with_extension("stderr");
         if stderr_path.exists() {
             // Expected to fail in some way
@@ -91,10 +136,10 @@ pub fn clone_rust() {
         download_and_unpack().unwrap();
     }
     let mut missing = String::new();
-    let test_src = Path::new("tests/rust/src");
+    let test_src = Path::new("tests/rust");
     for exclude in EXCLUDE {
         if !test_src.join(exclude).exists() {
-            missing += "\ntests/rust/src/";
+            missing += "\ntests/rust/";
             missing += exclude;
         }
     }

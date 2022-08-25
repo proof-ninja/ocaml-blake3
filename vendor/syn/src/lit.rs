@@ -3,12 +3,9 @@ use crate::lookahead;
 #[cfg(feature = "parsing")]
 use crate::parse::{Parse, Parser};
 use crate::{Error, Result};
-#[cfg(feature = "printing")]
-use proc_macro2::Ident;
+use proc_macro2::{Ident, Literal, Span};
 #[cfg(feature = "parsing")]
-use proc_macro2::TokenStream;
-use proc_macro2::TokenTree;
-use proc_macro2::{Literal, Span};
+use proc_macro2::{TokenStream, TokenTree};
 use std::fmt::{self, Display};
 #[cfg(feature = "extra-traits")]
 use std::hash::{Hash, Hasher};
@@ -21,10 +18,7 @@ ast_enum_of_structs! {
     ///
     /// This type is a [syntax tree enum].
     ///
-    /// [syntax tree enum]: enum.Expr.html#syntax-tree-enums
-    //
-    // TODO: change syntax-tree-enum link to an intra rustdoc link, currently
-    // blocked on https://github.com/rust-lang/rust/issues/62833
+    /// [syntax tree enum]: crate::Expr#syntax-tree-enums
     pub enum Lit {
         /// A UTF-8 string literal: `"foo"`.
         Str(LitStr),
@@ -43,7 +37,7 @@ ast_enum_of_structs! {
 
         /// A floating point literal: `1f64` or `1.0e10f64`.
         ///
-        /// Must be finite. May not be infinte or NaN.
+        /// Must be finite. May not be infinite or NaN.
         Float(LitFloat),
 
         /// A boolean literal: `true` or `false`.
@@ -173,6 +167,7 @@ impl LitStr {
     /// }
     /// ```
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse<T: Parse>(&self) -> Result<T> {
         self.parse_with(T::parse)
     }
@@ -202,6 +197,7 @@ impl LitStr {
     /// # }
     /// ```
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse_with<F: Parser>(&self, parser: F) -> Result<F::Output> {
         use proc_macro2::Group;
 
@@ -239,11 +235,15 @@ impl LitStr {
     }
 
     pub fn set_span(&mut self, span: Span) {
-        self.repr.token.set_span(span)
+        self.repr.token.set_span(span);
     }
 
     pub fn suffix(&self) -> &str {
         &self.repr.suffix
+    }
+
+    pub fn token(&self) -> Literal {
+        self.repr.token.clone()
     }
 }
 
@@ -270,11 +270,15 @@ impl LitByteStr {
     }
 
     pub fn set_span(&mut self, span: Span) {
-        self.repr.token.set_span(span)
+        self.repr.token.set_span(span);
     }
 
     pub fn suffix(&self) -> &str {
         &self.repr.suffix
+    }
+
+    pub fn token(&self) -> Literal {
+        self.repr.token.clone()
     }
 }
 
@@ -301,11 +305,15 @@ impl LitByte {
     }
 
     pub fn set_span(&mut self, span: Span) {
-        self.repr.token.set_span(span)
+        self.repr.token.set_span(span);
     }
 
     pub fn suffix(&self) -> &str {
         &self.repr.suffix
+    }
+
+    pub fn token(&self) -> Literal {
+        self.repr.token.clone()
     }
 }
 
@@ -332,11 +340,15 @@ impl LitChar {
     }
 
     pub fn set_span(&mut self, span: Span) {
-        self.repr.token.set_span(span)
+        self.repr.token.set_span(span);
     }
 
     pub fn suffix(&self) -> &str {
         &self.repr.suffix
+    }
+
+    pub fn token(&self) -> Literal {
+        self.repr.token.clone()
     }
 }
 
@@ -407,7 +419,11 @@ impl LitInt {
     }
 
     pub fn set_span(&mut self, span: Span) {
-        self.repr.token.set_span(span)
+        self.repr.token.set_span(span);
+    }
+
+    pub fn token(&self) -> Literal {
+        self.repr.token.clone()
     }
 }
 
@@ -479,7 +495,11 @@ impl LitFloat {
     }
 
     pub fn set_span(&mut self, span: Span) {
-        self.repr.token.set_span(span)
+        self.repr.token.set_span(span);
+    }
+
+    pub fn token(&self) -> Literal {
+        self.repr.token.clone()
     }
 }
 
@@ -506,11 +526,35 @@ impl Display for LitFloat {
     }
 }
 
+impl LitBool {
+    pub fn new(value: bool, span: Span) -> Self {
+        LitBool { value, span }
+    }
+
+    pub fn value(&self) -> bool {
+        self.value
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn set_span(&mut self, span: Span) {
+        self.span = span;
+    }
+
+    pub fn token(&self) -> Ident {
+        let s = if self.value { "true" } else { "false" };
+        Ident::new(s, self.span)
+    }
+}
+
 #[cfg(feature = "extra-traits")]
 mod debug_impls {
     use super::*;
     use std::fmt::{self, Debug};
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitStr {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -520,6 +564,7 @@ mod debug_impls {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitByteStr {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -529,6 +574,7 @@ mod debug_impls {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitByte {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -538,6 +584,7 @@ mod debug_impls {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitChar {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -547,6 +594,7 @@ mod debug_impls {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitInt {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -556,6 +604,7 @@ mod debug_impls {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitFloat {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -565,6 +614,7 @@ mod debug_impls {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
     impl Debug for LitBool {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter
@@ -576,6 +626,7 @@ mod debug_impls {
 }
 
 #[cfg(feature = "clone-impls")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "clone-impls")))]
 impl Clone for LitRepr {
     fn clone(&self) -> Self {
         LitRepr {
@@ -586,6 +637,7 @@ impl Clone for LitRepr {
 }
 
 #[cfg(feature = "clone-impls")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "clone-impls")))]
 impl Clone for LitIntRepr {
     fn clone(&self) -> Self {
         LitIntRepr {
@@ -597,6 +649,7 @@ impl Clone for LitIntRepr {
 }
 
 #[cfg(feature = "clone-impls")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "clone-impls")))]
 impl Clone for LitFloatRepr {
     fn clone(&self) -> Self {
         LitFloatRepr {
@@ -610,6 +663,7 @@ impl Clone for LitFloatRepr {
 macro_rules! lit_extra_traits {
     ($ty:ident) => {
         #[cfg(feature = "clone-impls")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "clone-impls")))]
         impl Clone for $ty {
             fn clone(&self) -> Self {
                 $ty {
@@ -619,6 +673,7 @@ macro_rules! lit_extra_traits {
         }
 
         #[cfg(feature = "extra-traits")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
         impl PartialEq for $ty {
             fn eq(&self, other: &Self) -> bool {
                 self.repr.token.to_string() == other.repr.token.to_string()
@@ -626,6 +681,7 @@ macro_rules! lit_extra_traits {
         }
 
         #[cfg(feature = "extra-traits")]
+        #[cfg_attr(doc_cfg, doc(cfg(feature = "extra-traits")))]
         impl Hash for $ty {
             fn hash<H>(&self, state: &mut H)
             where
@@ -685,6 +741,7 @@ pub mod parsing {
     use crate::parse::{Parse, ParseStream, Result};
     use proc_macro2::Punct;
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for Lit {
         fn parse(input: ParseStream) -> Result<Self> {
             input.step(|cursor| {
@@ -756,6 +813,7 @@ pub mod parsing {
         ))
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitStr {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -766,6 +824,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitByteStr {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -776,6 +835,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitByte {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -786,6 +846,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitChar {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -796,6 +857,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitInt {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -806,6 +868,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitFloat {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -816,6 +879,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for LitBool {
         fn parse(input: ParseStream) -> Result<Self> {
             let head = input.fork();
@@ -833,46 +897,52 @@ mod printing {
     use proc_macro2::TokenStream;
     use quote::{ToTokens, TokenStreamExt};
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitStr {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.repr.token.to_tokens(tokens);
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitByteStr {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.repr.token.to_tokens(tokens);
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitByte {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.repr.token.to_tokens(tokens);
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitChar {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.repr.token.to_tokens(tokens);
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitInt {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.repr.token.to_tokens(tokens);
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitFloat {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.repr.token.to_tokens(tokens);
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for LitBool {
         fn to_tokens(&self, tokens: &mut TokenStream) {
-            let s = if self.value { "true" } else { "false" };
-            tokens.append(Ident::new(s, self.span));
+            tokens.append(self.token());
         }
     }
 }
@@ -880,7 +950,6 @@ mod printing {
 mod value {
     use super::*;
     use crate::bigint::BigInt;
-    use proc_macro2::TokenStream;
     use std::char;
     use std::ops::{Index, RangeFrom};
 
@@ -1280,7 +1349,7 @@ mod value {
 
     fn backslash_u(mut s: &str) -> (char, &str) {
         if byte(s, 0) != b'{' {
-            panic!("expected {{ after \\u");
+            panic!("{}", "expected { after \\u");
         }
         s = &s[1..];
 
@@ -1392,7 +1461,7 @@ mod value {
         }
 
         let suffix = s;
-        if suffix.is_empty() || crate::ident::xid_ok(&suffix) {
+        if suffix.is_empty() || crate::ident::xid_ok(suffix) {
             let mut repr = value.to_string();
             if negative {
                 repr.insert(0, '-');
@@ -1411,7 +1480,7 @@ mod value {
 
         let mut bytes = input.to_owned().into_bytes();
 
-        let start = (*bytes.get(0)? == b'-') as usize;
+        let start = (*bytes.first()? == b'-') as usize;
         match bytes.get(start)? {
             b'0'..=b'9' => {}
             _ => return None,
@@ -1495,35 +1564,37 @@ mod value {
         }
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     pub fn to_literal(repr: &str, digits: &str, suffix: &str) -> Option<Literal> {
-        if repr.starts_with('-') {
-            let f64_parse_finite = || digits.parse().ok().filter(|x: &f64| x.is_finite());
-            let f32_parse_finite = || digits.parse().ok().filter(|x: &f32| x.is_finite());
-            if suffix == "f64" {
-                f64_parse_finite().map(Literal::f64_suffixed)
-            } else if suffix == "f32" {
-                f32_parse_finite().map(Literal::f32_suffixed)
-            } else if suffix == "i64" {
-                digits.parse().ok().map(Literal::i64_suffixed)
-            } else if suffix == "i32" {
-                digits.parse().ok().map(Literal::i32_suffixed)
-            } else if suffix == "i16" {
-                digits.parse().ok().map(Literal::i16_suffixed)
-            } else if suffix == "i8" {
-                digits.parse().ok().map(Literal::i8_suffixed)
-            } else if !suffix.is_empty() {
-                None
-            } else if digits.contains('.') {
-                f64_parse_finite().map(Literal::f64_unsuffixed)
-            } else {
-                digits.parse().ok().map(Literal::i64_unsuffixed)
-            }
-        } else {
-            let stream = repr.parse::<TokenStream>().unwrap();
-            match stream.into_iter().next().unwrap() {
-                TokenTree::Literal(l) => Some(l),
-                _ => unreachable!(),
+        #[cfg(syn_no_negative_literal_parse)]
+        {
+            // Rustc older than https://github.com/rust-lang/rust/pull/87262.
+            if repr.starts_with('-') {
+                let f64_parse_finite = || digits.parse().ok().filter(|x: &f64| x.is_finite());
+                let f32_parse_finite = || digits.parse().ok().filter(|x: &f32| x.is_finite());
+                return if suffix == "f64" {
+                    f64_parse_finite().map(Literal::f64_suffixed)
+                } else if suffix == "f32" {
+                    f32_parse_finite().map(Literal::f32_suffixed)
+                } else if suffix == "i64" {
+                    digits.parse().ok().map(Literal::i64_suffixed)
+                } else if suffix == "i32" {
+                    digits.parse().ok().map(Literal::i32_suffixed)
+                } else if suffix == "i16" {
+                    digits.parse().ok().map(Literal::i16_suffixed)
+                } else if suffix == "i8" {
+                    digits.parse().ok().map(Literal::i8_suffixed)
+                } else if !suffix.is_empty() {
+                    None
+                } else if digits.contains('.') {
+                    f64_parse_finite().map(Literal::f64_unsuffixed)
+                } else {
+                    digits.parse().ok().map(Literal::i64_unsuffixed)
+                };
             }
         }
+        let _ = digits;
+        let _ = suffix;
+        Some(repr.parse::<Literal>().unwrap())
     }
 }

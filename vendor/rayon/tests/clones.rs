@@ -102,9 +102,17 @@ fn clone_vec() {
     check(v.par_iter());
     check(v.par_chunks(42));
     check(v.par_chunks_exact(42));
+    check(v.par_rchunks(42));
+    check(v.par_rchunks_exact(42));
     check(v.par_windows(42));
     check(v.par_split(|x| x % 3 == 0));
     check(v.into_par_iter());
+}
+
+#[test]
+fn clone_array() {
+    let a = [0i32; 100];
+    check(a.into_par_iter());
 }
 
 #[test]

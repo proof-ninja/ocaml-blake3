@@ -9,7 +9,8 @@ macro_rules! expand_align {
                            target_arch = "sparc64",
                            target_arch = "aarch64",
                            target_arch = "riscv64",
-                           target_arch = "riscv32"),
+                           target_arch = "riscv32",
+                           target_arch = "loongarch64"),
                        repr(align(4)))]
             #[cfg_attr(not(any(target_pointer_width = "32",
                                target_arch = "x86_64",
@@ -19,7 +20,8 @@ macro_rules! expand_align {
                                target_arch = "sparc64",
                                target_arch = "aarch64",
                                target_arch = "riscv64",
-                               target_arch = "riscv32")),
+                               target_arch = "riscv32",
+                               target_arch = "loongarch64")),
                        repr(align(8)))]
             pub struct pthread_mutexattr_t {
                 #[doc(hidden)]
@@ -76,6 +78,7 @@ macro_rules! expand_align {
                            any(target_arch = "mips",
                                target_arch = "arm",
                                target_arch = "hexagon",
+                               target_arch = "m68k",
                                target_arch = "powerpc",
                                target_arch = "sparc",
                                target_arch = "x86_64",
@@ -85,6 +88,7 @@ macro_rules! expand_align {
                            not(any(target_arch = "mips",
                                    target_arch = "arm",
                                    target_arch = "hexagon",
+                                   target_arch = "m68k",
                                    target_arch = "powerpc",
                                    target_arch = "sparc",
                                    target_arch = "x86_64",
@@ -99,6 +103,7 @@ macro_rules! expand_align {
                            any(target_arch = "mips",
                                target_arch = "arm",
                                target_arch = "hexagon",
+                               target_arch = "m68k",
                                target_arch = "powerpc",
                                target_arch = "sparc",
                                target_arch = "x86_64",
@@ -108,6 +113,7 @@ macro_rules! expand_align {
                            not(any(target_arch = "mips",
                                    target_arch = "arm",
                                    target_arch = "hexagon",
+                                   target_arch = "m68k",
                                    target_arch = "powerpc",
                                    target_arch = "sparc",
                                    target_arch = "x86_64",
@@ -115,6 +121,29 @@ macro_rules! expand_align {
                        repr(align(8)))]
             pub struct pthread_rwlock_t {
                 size: [u8; ::__SIZEOF_PTHREAD_RWLOCK_T],
+            }
+
+            // linux/can.h
+            #[repr(align(8))]
+            #[allow(missing_debug_implementations)]
+            pub struct can_frame {
+                pub can_id: canid_t,
+                pub can_dlc: u8,
+                __pad: u8,
+                __res0: u8,
+                __res1: u8,
+                pub data: [u8; CAN_MAX_DLEN],
+            }
+
+            #[repr(align(8))]
+            #[allow(missing_debug_implementations)]
+            pub struct canfd_frame {
+                pub can_id: canid_t,
+                pub len: u8,
+                pub flags: u8,
+                __res0: u8,
+                __res1: u8,
+                pub data: [u8; CANFD_MAX_DLEN],
             }
         }
     };

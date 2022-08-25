@@ -1,8 +1,11 @@
 //! Atomic types.
+//!
+//! * [`AtomicCell`], a thread-safe mutable memory location.
+//! * [`AtomicConsume`], for reading from primitive atomic types with "consume" ordering.
 
-use cfg_if::cfg_if;
-
-cfg_if! {
+#[cfg(not(crossbeam_no_atomic_cas))]
+#[cfg(not(crossbeam_loom))]
+cfg_if::cfg_if! {
     // Use "wide" sequence lock if the pointer width <= 32 for preventing its counter against wrap
     // around.
     //
@@ -20,8 +23,15 @@ cfg_if! {
     }
 }
 
+#[cfg(not(crossbeam_no_atomic_cas))]
+// We cannot provide AtomicCell under cfg(crossbeam_loom) because loom's atomic
+// types have a different in-memory representation than the underlying type.
+// TODO: The latest loom supports fences, so fallback using seqlock may be available.
+#[cfg(not(crossbeam_loom))]
 mod atomic_cell;
 mod consume;
 
+#[cfg(not(crossbeam_no_atomic_cas))]
+#[cfg(not(crossbeam_loom))]
 pub use self::atomic_cell::AtomicCell;
 pub use self::consume::AtomicConsume;
