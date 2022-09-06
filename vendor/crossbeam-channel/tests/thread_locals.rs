@@ -1,5 +1,7 @@
 //! Tests that make sure accessing thread-locals while exiting the thread doesn't cause panics.
 
+#![cfg(not(miri))] // Miri detects that this test is buggy: the destructor of `FOO` uses `std::thread::current()`!
+
 use std::thread;
 use std::time::Duration;
 

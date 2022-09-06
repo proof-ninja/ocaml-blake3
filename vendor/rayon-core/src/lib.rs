@@ -1,5 +1,30 @@
+//! Rayon-core houses the core stable APIs of Rayon.
 //!
-//! [Under construction](https://github.com/rayon-rs/rayon/issues/231)
+//! These APIs have been mirrored in the Rayon crate and it is recommended to use these from there.
+//!
+//! [`join`] is used to take two closures and potentially run them in parallel.
+//!   - It will run in parallel if task B gets stolen before task A can finish.
+//!   - It will run sequentially if task A finishes before task B is stolen and can continue on task B.
+//!
+//! [`scope`] creates a scope in which you can run any number of parallel tasks.
+//! These tasks can spawn nested tasks and scopes, but given the nature of work stealing, the order of execution can not be guaranteed.
+//! The scope will exist until all tasks spawned within the scope have been completed.
+//!
+//! [`spawn`] add a task into the 'static' or 'global' scope, or a local scope created by the [`scope()`] function.
+//!
+//! [`ThreadPool`] can be used to create your own thread pools (using [`ThreadPoolBuilder`]) or to customize the global one.
+//! Tasks spawned within the pool (using [`install()`], [`join()`], etc.) will be added to a deque,
+//! where it becomes available for work stealing from other threads in the local threadpool.
+//!
+//! [`join`]: fn.join.html
+//! [`scope`]: fn.scope.html
+//! [`scope()`]: fn.scope.html
+//! [`spawn`]: fn.spawn.html
+//! [`ThreadPool`]: struct.threadpool.html
+//! [`install()`]: struct.ThreadPool.html#method.install
+//! [`spawn()`]: struct.ThreadPool.html#method.spawn
+//! [`join()`]: struct.ThreadPool.html#method.join
+//! [`ThreadPoolBuilder`]: struct.ThreadPoolBuilder.html
 //!
 //! ## Restricting multiple versions
 //!
@@ -47,21 +72,31 @@ mod sleep;
 mod spawn;
 mod thread_pool;
 mod unwind;
-mod util;
 
 mod compile_fail;
 mod test;
 
 pub use self::join::{join, join_context};
 pub use self::registry::ThreadBuilder;
-pub use self::scope::{scope, Scope};
-pub use self::scope::{scope_fifo, ScopeFifo};
+pub use self::scope::{in_place_scope, scope, Scope};
+pub use self::scope::{in_place_scope_fifo, scope_fifo, ScopeFifo};
 pub use self::spawn::{spawn, spawn_fifo};
 pub use self::thread_pool::current_thread_has_pending_tasks;
 pub use self::thread_pool::current_thread_index;
 pub use self::thread_pool::ThreadPool;
 
 use self::registry::{CustomSpawn, DefaultSpawn, ThreadSpawn};
+
+/// Returns the maximum number of threads that Rayon supports in a single thread-pool.
+///
+/// If a higher thread count is requested by calling `ThreadPoolBuilder::num_threads` or by setting
+/// the `RAYON_NUM_THREADS` environment variable, then it will be reduced to this maximum.
+///
+/// The value may vary between different targets, and is subject to change in new Rayon versions.
+pub fn max_num_threads() -> usize {
+    // We are limited by the bits available in the sleep counter's `AtomicUsize`.
+    crate::sleep::THREADS_MAX
+}
 
 /// Returns the number of threads in the current registry. If this
 /// code is executing within a Rayon thread-pool, then this will be
@@ -438,7 +473,7 @@ impl<S> ThreadPoolBuilder<S> {
     /// **Old environment variable:** `RAYON_NUM_THREADS` is a one-to-one
     /// replacement of the now deprecated `RAYON_RS_NUM_CPUS` environment
     /// variable. If both variables are specified, `RAYON_NUM_THREADS` will
-    /// be prefered.
+    /// be preferred.
     pub fn num_threads(mut self, num_threads: usize) -> Self {
         self.num_threads = num_threads;
         self

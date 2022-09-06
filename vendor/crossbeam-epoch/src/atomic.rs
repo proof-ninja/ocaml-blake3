@@ -5,12 +5,12 @@ use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::slice;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::Ordering;
 
 use crate::alloc::alloc;
 use crate::alloc::boxed::Box;
 use crate::guard::Guard;
-use const_fn::const_fn;
+use crate::primitive::sync::atomic::AtomicUsize;
 use crossbeam_utils::atomic::AtomicConsume;
 
 /// Given ordering for the success case in a compare-exchange operation, returns the strongest
@@ -26,7 +26,12 @@ fn strongest_failure_ordering(ord: Ordering) -> Ordering {
 }
 
 /// The error returned on failed compare-and-set operation.
-pub struct CompareAndSetError<'g, T: ?Sized + Pointable, P: Pointer<T>> {
+// TODO: remove in the next major version.
+#[deprecated(note = "Use `CompareExchangeError` instead")]
+pub type CompareAndSetError<'g, T, P> = CompareExchangeError<'g, T, P>;
+
+/// The error returned on failed compare-and-swap operation.
+pub struct CompareExchangeError<'g, T: ?Sized + Pointable, P: Pointer<T>> {
     /// The value in the atomic pointer at the time of the failed operation.
     pub current: Shared<'g, T>,
 
@@ -34,9 +39,9 @@ pub struct CompareAndSetError<'g, T: ?Sized + Pointable, P: Pointer<T>> {
     pub new: P,
 }
 
-impl<'g, T: 'g, P: Pointer<T> + fmt::Debug> fmt::Debug for CompareAndSetError<'g, T, P> {
+impl<T, P: Pointer<T> + fmt::Debug> fmt::Debug for CompareExchangeError<'_, T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CompareAndSetError")
+        f.debug_struct("CompareExchangeError")
             .field("current", &self.current)
             .field("new", &self.new)
             .finish()
@@ -54,6 +59,11 @@ impl<'g, T: 'g, P: Pointer<T> + fmt::Debug> fmt::Debug for CompareAndSetError<'g
 ///    ordering is chosen.
 /// 2. A pair of `Ordering`s. The first one is for the success case, while the second one is
 ///    for the failure case.
+// TODO: remove in the next major version.
+#[deprecated(
+    note = "`compare_and_set` and `compare_and_set_weak` that use this trait are deprecated, \
+            use `compare_exchange` or `compare_exchange_weak instead`"
+)]
 pub trait CompareAndSetOrdering {
     /// The ordering of the operation when it succeeds.
     fn success(&self) -> Ordering;
@@ -65,6 +75,7 @@ pub trait CompareAndSetOrdering {
     fn failure(&self) -> Ordering;
 }
 
+#[allow(deprecated)]
 impl CompareAndSetOrdering for Ordering {
     #[inline]
     fn success(&self) -> Ordering {
@@ -77,6 +88,7 @@ impl CompareAndSetOrdering for Ordering {
     }
 }
 
+#[allow(deprecated)]
 impl CompareAndSetOrdering for (Ordering, Ordering) {
     #[inline]
     fn success(&self) -> Ordering {
@@ -226,7 +238,8 @@ impl<T> Pointable for T {
 // [`alloc::alloc::Layout::extend`] instead.
 #[repr(C)]
 struct Array<T> {
-    size: usize,
+    /// The number of elements (not the number of bytes).
+    len: usize,
     elements: [MaybeUninit<T>; 0],
 }
 
@@ -235,28 +248,31 @@ impl<T> Pointable for [MaybeUninit<T>] {
 
     type Init = usize;
 
-    unsafe fn init(size: Self::Init) -> usize {
-        let size = mem::size_of::<Array<T>>() + mem::size_of::<MaybeUninit<T>>() * size;
+    unsafe fn init(len: Self::Init) -> usize {
+        let size = mem::size_of::<Array<T>>() + mem::size_of::<MaybeUninit<T>>() * len;
         let align = mem::align_of::<Array<T>>();
         let layout = alloc::Layout::from_size_align(size, align).unwrap();
-        let ptr = alloc::alloc(layout) as *mut Array<T>;
-        (*ptr).size = size;
+        let ptr = alloc::alloc(layout).cast::<Array<T>>();
+        if ptr.is_null() {
+            alloc::handle_alloc_error(layout);
+        }
+        (*ptr).len = len;
         ptr as usize
     }
 
     unsafe fn deref<'a>(ptr: usize) -> &'a Self {
         let array = &*(ptr as *const Array<T>);
-        slice::from_raw_parts(array.elements.as_ptr() as *const _, array.size)
+        slice::from_raw_parts(array.elements.as_ptr() as *const _, array.len)
     }
 
     unsafe fn deref_mut<'a>(ptr: usize) -> &'a mut Self {
         let array = &*(ptr as *mut Array<T>);
-        slice::from_raw_parts_mut(array.elements.as_ptr() as *mut _, array.size)
+        slice::from_raw_parts_mut(array.elements.as_ptr() as *mut _, array.len)
     }
 
     unsafe fn drop(ptr: usize) {
         let array = &*(ptr as *mut Array<T>);
-        let size = mem::size_of::<Array<T>>() + mem::size_of::<MaybeUninit<T>>() * array.size;
+        let size = mem::size_of::<Array<T>>() + mem::size_of::<MaybeUninit<T>>() * array.len;
         let align = mem::align_of::<Array<T>>();
         let layout = alloc::Layout::from_size_align(size, align).unwrap();
         alloc::dealloc(ptr as *mut u8, layout);
@@ -289,6 +305,7 @@ impl<T> Atomic<T> {
     /// use crossbeam_epoch::Atomic;
     ///
     /// let a = Atomic::new(1234);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn new(init: T) -> Atomic<T> {
         Self::init(init)
@@ -304,6 +321,7 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// use crossbeam_epoch::Atomic;
     ///
     /// let a = Atomic::<i32>::init(1234);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn init(init: T::Init) -> Atomic<T> {
         Self::from(Owned::init(init))
@@ -326,9 +344,17 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     ///
     /// let a = Atomic::<i32>::null();
     /// ```
-    ///
-    #[const_fn(feature = "nightly")]
+    #[cfg(all(not(crossbeam_no_const_fn_trait_bound), not(crossbeam_loom)))]
     pub const fn null() -> Atomic<T> {
+        Self {
+            data: AtomicUsize::new(0),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns a new null atomic pointer.
+    #[cfg(not(all(not(crossbeam_no_const_fn_trait_bound), not(crossbeam_loom))))]
+    pub fn null() -> Atomic<T> {
         Self {
             data: AtomicUsize::new(0),
             _marker: PhantomData,
@@ -349,6 +375,7 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// let a = Atomic::new(1234);
     /// let guard = &epoch::pin();
     /// let p = a.load(SeqCst, guard);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn load<'g>(&self, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
         unsafe { Shared::from_usize(self.data.load(ord)) }
@@ -374,6 +401,7 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// let a = Atomic::new(1234);
     /// let guard = &epoch::pin();
     /// let p = a.load_consume(guard);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn load_consume<'g>(&self, _: &'g Guard) -> Shared<'g, T> {
         unsafe { Shared::from_usize(self.data.load_consume()) }
@@ -391,8 +419,10 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// use std::sync::atomic::Ordering::SeqCst;
     ///
     /// let a = Atomic::new(1234);
+    /// # unsafe { drop(a.load(SeqCst, &crossbeam_epoch::pin()).into_owned()); } // avoid leak
     /// a.store(Shared::null(), SeqCst);
     /// a.store(Owned::new(1234), SeqCst);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     pub fn store<P: Pointer<T>>(&self, new: P, ord: Ordering) {
         self.data.store(new.into_usize(), ord);
@@ -413,6 +443,7 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// let a = Atomic::new(1234);
     /// let guard = &epoch::pin();
     /// let p = a.swap(Shared::null(), SeqCst, guard);
+    /// # unsafe { drop(p.into_owned()); } // avoid leak
     /// ```
     pub fn swap<'g, P: Pointer<T>>(&self, new: P, ord: Ordering, _: &'g Guard) -> Shared<'g, T> {
         unsafe { Shared::from_usize(self.data.swap(new.into_usize(), ord)) }
@@ -426,8 +457,14 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// pointer that was written is returned. On failure the actual current value and `new` are
     /// returned.
     ///
-    /// This method takes a [`CompareAndSetOrdering`] argument which describes the memory
-    /// ordering of this operation.
+    /// This method takes two `Ordering` arguments to describe the memory
+    /// ordering of this operation. `success` describes the required ordering for the
+    /// read-modify-write operation that takes place if the comparison with `current` succeeds.
+    /// `failure` describes the required ordering for the load operation that takes place when
+    /// the comparison fails. Using `Acquire` as success ordering makes the store part
+    /// of this operation `Relaxed`, and using `Release` makes the successful load
+    /// `Relaxed`. The failure ordering can only be `SeqCst`, `Acquire` or `Relaxed`
+    /// and must be equivalent to or weaker than the success ordering.
     ///
     /// # Examples
     ///
@@ -439,30 +476,224 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     ///
     /// let guard = &epoch::pin();
     /// let curr = a.load(SeqCst, guard);
+    /// let res1 = a.compare_exchange(curr, Shared::null(), SeqCst, SeqCst, guard);
+    /// let res2 = a.compare_exchange(curr, Owned::new(5678), SeqCst, SeqCst, guard);
+    /// # unsafe { drop(curr.into_owned()); } // avoid leak
+    /// ```
+    pub fn compare_exchange<'g, P>(
+        &self,
+        current: Shared<'_, T>,
+        new: P,
+        success: Ordering,
+        failure: Ordering,
+        _: &'g Guard,
+    ) -> Result<Shared<'g, T>, CompareExchangeError<'g, T, P>>
+    where
+        P: Pointer<T>,
+    {
+        let new = new.into_usize();
+        self.data
+            .compare_exchange(current.into_usize(), new, success, failure)
+            .map(|_| unsafe { Shared::from_usize(new) })
+            .map_err(|current| unsafe {
+                CompareExchangeError {
+                    current: Shared::from_usize(current),
+                    new: P::from_usize(new),
+                }
+            })
+    }
+
+    /// Stores the pointer `new` (either `Shared` or `Owned`) into the atomic pointer if the current
+    /// value is the same as `current`. The tag is also taken into account, so two pointers to the
+    /// same object, but with different tags, will not be considered equal.
+    ///
+    /// Unlike [`compare_exchange`], this method is allowed to spuriously fail even when comparison
+    /// succeeds, which can result in more efficient code on some platforms.  The return value is a
+    /// result indicating whether the new pointer was written. On success the pointer that was
+    /// written is returned. On failure the actual current value and `new` are returned.
+    ///
+    /// This method takes two `Ordering` arguments to describe the memory
+    /// ordering of this operation. `success` describes the required ordering for the
+    /// read-modify-write operation that takes place if the comparison with `current` succeeds.
+    /// `failure` describes the required ordering for the load operation that takes place when
+    /// the comparison fails. Using `Acquire` as success ordering makes the store part
+    /// of this operation `Relaxed`, and using `Release` makes the successful load
+    /// `Relaxed`. The failure ordering can only be `SeqCst`, `Acquire` or `Relaxed`
+    /// and must be equivalent to or weaker than the success ordering.
+    ///
+    /// [`compare_exchange`]: Atomic::compare_exchange
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic, Owned, Shared};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::new(1234);
+    /// let guard = &epoch::pin();
+    ///
+    /// let mut new = Owned::new(5678);
+    /// let mut ptr = a.load(SeqCst, guard);
+    /// # unsafe { drop(a.load(SeqCst, guard).into_owned()); } // avoid leak
+    /// loop {
+    ///     match a.compare_exchange_weak(ptr, new, SeqCst, SeqCst, guard) {
+    ///         Ok(p) => {
+    ///             ptr = p;
+    ///             break;
+    ///         }
+    ///         Err(err) => {
+    ///             ptr = err.current;
+    ///             new = err.new;
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// let mut curr = a.load(SeqCst, guard);
+    /// loop {
+    ///     match a.compare_exchange_weak(curr, Shared::null(), SeqCst, SeqCst, guard) {
+    ///         Ok(_) => break,
+    ///         Err(err) => curr = err.current,
+    ///     }
+    /// }
+    /// # unsafe { drop(curr.into_owned()); } // avoid leak
+    /// ```
+    pub fn compare_exchange_weak<'g, P>(
+        &self,
+        current: Shared<'_, T>,
+        new: P,
+        success: Ordering,
+        failure: Ordering,
+        _: &'g Guard,
+    ) -> Result<Shared<'g, T>, CompareExchangeError<'g, T, P>>
+    where
+        P: Pointer<T>,
+    {
+        let new = new.into_usize();
+        self.data
+            .compare_exchange_weak(current.into_usize(), new, success, failure)
+            .map(|_| unsafe { Shared::from_usize(new) })
+            .map_err(|current| unsafe {
+                CompareExchangeError {
+                    current: Shared::from_usize(current),
+                    new: P::from_usize(new),
+                }
+            })
+    }
+
+    /// Fetches the pointer, and then applies a function to it that returns a new value.
+    /// Returns a `Result` of `Ok(previous_value)` if the function returned `Some`, else `Err(_)`.
+    ///
+    /// Note that the given function may be called multiple times if the value has been changed by
+    /// other threads in the meantime, as long as the function returns `Some(_)`, but the function
+    /// will have been applied only once to the stored value.
+    ///
+    /// `fetch_update` takes two [`Ordering`] arguments to describe the memory
+    /// ordering of this operation. The first describes the required ordering for
+    /// when the operation finally succeeds while the second describes the
+    /// required ordering for loads. These correspond to the success and failure
+    /// orderings of [`Atomic::compare_exchange`] respectively.
+    ///
+    /// Using [`Acquire`] as success ordering makes the store part of this
+    /// operation [`Relaxed`], and using [`Release`] makes the final successful
+    /// load [`Relaxed`]. The (failed) load ordering can only be [`SeqCst`],
+    /// [`Acquire`] or [`Relaxed`] and must be equivalent to or weaker than the
+    /// success ordering.
+    ///
+    /// [`Relaxed`]: Ordering::Relaxed
+    /// [`Acquire`]: Ordering::Acquire
+    /// [`Release`]: Ordering::Release
+    /// [`SeqCst`]: Ordering::SeqCst
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::new(1234);
+    /// let guard = &epoch::pin();
+    ///
+    /// let res1 = a.fetch_update(SeqCst, SeqCst, guard, |x| Some(x.with_tag(1)));
+    /// assert!(res1.is_ok());
+    ///
+    /// let res2 = a.fetch_update(SeqCst, SeqCst, guard, |x| None);
+    /// assert!(res2.is_err());
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
+    /// ```
+    pub fn fetch_update<'g, F>(
+        &self,
+        set_order: Ordering,
+        fail_order: Ordering,
+        guard: &'g Guard,
+        mut func: F,
+    ) -> Result<Shared<'g, T>, Shared<'g, T>>
+    where
+        F: FnMut(Shared<'g, T>) -> Option<Shared<'g, T>>,
+    {
+        let mut prev = self.load(fail_order, guard);
+        while let Some(next) = func(prev) {
+            match self.compare_exchange_weak(prev, next, set_order, fail_order, guard) {
+                Ok(shared) => return Ok(shared),
+                Err(next_prev) => prev = next_prev.current,
+            }
+        }
+        Err(prev)
+    }
+
+    /// Stores the pointer `new` (either `Shared` or `Owned`) into the atomic pointer if the current
+    /// value is the same as `current`. The tag is also taken into account, so two pointers to the
+    /// same object, but with different tags, will not be considered equal.
+    ///
+    /// The return value is a result indicating whether the new pointer was written. On success the
+    /// pointer that was written is returned. On failure the actual current value and `new` are
+    /// returned.
+    ///
+    /// This method takes a [`CompareAndSetOrdering`] argument which describes the memory
+    /// ordering of this operation.
+    ///
+    /// # Migrating to `compare_exchange`
+    ///
+    /// `compare_and_set` is equivalent to `compare_exchange` with the following mapping for
+    /// memory orderings:
+    ///
+    /// Original | Success | Failure
+    /// -------- | ------- | -------
+    /// Relaxed  | Relaxed | Relaxed
+    /// Acquire  | Acquire | Acquire
+    /// Release  | Release | Relaxed
+    /// AcqRel   | AcqRel  | Acquire
+    /// SeqCst   | SeqCst  | SeqCst
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![allow(deprecated)]
+    /// use crossbeam_epoch::{self as epoch, Atomic, Owned, Shared};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::new(1234);
+    ///
+    /// let guard = &epoch::pin();
+    /// let curr = a.load(SeqCst, guard);
     /// let res1 = a.compare_and_set(curr, Shared::null(), SeqCst, guard);
     /// let res2 = a.compare_and_set(curr, Owned::new(5678), SeqCst, guard);
+    /// # unsafe { drop(curr.into_owned()); } // avoid leak
     /// ```
+    // TODO: remove in the next major version.
+    #[allow(deprecated)]
+    #[deprecated(note = "Use `compare_exchange` instead")]
     pub fn compare_and_set<'g, O, P>(
         &self,
         current: Shared<'_, T>,
         new: P,
         ord: O,
-        _: &'g Guard,
+        guard: &'g Guard,
     ) -> Result<Shared<'g, T>, CompareAndSetError<'g, T, P>>
     where
         O: CompareAndSetOrdering,
         P: Pointer<T>,
     {
-        let new = new.into_usize();
-        self.data
-            .compare_exchange(current.into_usize(), new, ord.success(), ord.failure())
-            .map(|_| unsafe { Shared::from_usize(new) })
-            .map_err(|current| unsafe {
-                CompareAndSetError {
-                    current: Shared::from_usize(current),
-                    new: P::from_usize(new),
-                }
-            })
+        self.compare_exchange(current, new, ord.success(), ord.failure(), guard)
     }
 
     /// Stores the pointer `new` (either `Shared` or `Owned`) into the atomic pointer if the current
@@ -479,9 +710,23 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     ///
     /// [`compare_and_set`]: Atomic::compare_and_set
     ///
+    /// # Migrating to `compare_exchange_weak`
+    ///
+    /// `compare_and_set_weak` is equivalent to `compare_exchange_weak` with the following mapping for
+    /// memory orderings:
+    ///
+    /// Original | Success | Failure
+    /// -------- | ------- | -------
+    /// Relaxed  | Relaxed | Relaxed
+    /// Acquire  | Acquire | Acquire
+    /// Release  | Release | Relaxed
+    /// AcqRel   | AcqRel  | Acquire
+    /// SeqCst   | SeqCst  | SeqCst
+    ///
     /// # Examples
     ///
     /// ```
+    /// # #![allow(deprecated)]
     /// use crossbeam_epoch::{self as epoch, Atomic, Owned, Shared};
     /// use std::sync::atomic::Ordering::SeqCst;
     ///
@@ -490,6 +735,7 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     ///
     /// let mut new = Owned::new(5678);
     /// let mut ptr = a.load(SeqCst, guard);
+    /// # unsafe { drop(a.load(SeqCst, guard).into_owned()); } // avoid leak
     /// loop {
     ///     match a.compare_and_set_weak(ptr, new, SeqCst, guard) {
     ///         Ok(p) => {
@@ -510,28 +756,23 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     ///         Err(err) => curr = err.current,
     ///     }
     /// }
+    /// # unsafe { drop(curr.into_owned()); } // avoid leak
     /// ```
+    // TODO: remove in the next major version.
+    #[allow(deprecated)]
+    #[deprecated(note = "Use `compare_exchange_weak` instead")]
     pub fn compare_and_set_weak<'g, O, P>(
         &self,
         current: Shared<'_, T>,
         new: P,
         ord: O,
-        _: &'g Guard,
+        guard: &'g Guard,
     ) -> Result<Shared<'g, T>, CompareAndSetError<'g, T, P>>
     where
         O: CompareAndSetOrdering,
         P: Pointer<T>,
     {
-        let new = new.into_usize();
-        self.data
-            .compare_exchange_weak(current.into_usize(), new, ord.success(), ord.failure())
-            .map(|_| unsafe { Shared::from_usize(new) })
-            .map_err(|current| unsafe {
-                CompareAndSetError {
-                    current: Shared::from_usize(current),
-                    new: P::from_usize(new),
-                }
-            })
+        self.compare_exchange_weak(current, new, ord.success(), ord.failure(), guard)
     }
 
     /// Bitwise "and" with the current tag.
@@ -638,7 +879,63 @@ impl<T: ?Sized + Pointable> Atomic<T> {
     /// }
     /// ```
     pub unsafe fn into_owned(self) -> Owned<T> {
-        Owned::from_usize(self.data.into_inner())
+        #[cfg(crossbeam_loom)]
+        {
+            // FIXME: loom does not yet support into_inner, so we use unsync_load for now,
+            // which should have the same synchronization properties:
+            // https://github.com/tokio-rs/loom/issues/117
+            Owned::from_usize(self.data.unsync_load())
+        }
+        #[cfg(not(crossbeam_loom))]
+        {
+            Owned::from_usize(self.data.into_inner())
+        }
+    }
+
+    /// Takes ownership of the pointee if it is non-null.
+    ///
+    /// This consumes the atomic and converts it into [`Owned`]. As [`Atomic`] doesn't have a
+    /// destructor and doesn't drop the pointee while [`Owned`] does, this is suitable for
+    /// destructors of data structures.
+    ///
+    /// # Safety
+    ///
+    /// This method may be called only if the pointer is valid and nobody else is holding a
+    /// reference to the same object, or the pointer is null.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use std::mem;
+    /// # use crossbeam_epoch::Atomic;
+    /// struct DataStructure {
+    ///     ptr: Atomic<usize>,
+    /// }
+    ///
+    /// impl Drop for DataStructure {
+    ///     fn drop(&mut self) {
+    ///         // By now the DataStructure lives only in our thread and we are sure we don't hold
+    ///         // any Shared or & to it ourselves, but it may be null, so we have to be careful.
+    ///         let old = mem::replace(&mut self.ptr, Atomic::null());
+    ///         unsafe {
+    ///             if let Some(x) = old.try_into_owned() {
+    ///                 drop(x)
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub unsafe fn try_into_owned(self) -> Option<Owned<T>> {
+        // FIXME: See self.into_owned()
+        #[cfg(crossbeam_loom)]
+        let data = self.data.unsync_load();
+        #[cfg(not(crossbeam_loom))]
+        let data = self.data.into_inner();
+        if decompose_tag::<T>(data).0 == 0 {
+            None
+        } else {
+            Some(Owned::from_usize(data))
+        }
     }
 }
 
@@ -688,6 +985,7 @@ impl<T: ?Sized + Pointable> From<Owned<T>> for Atomic<T> {
     /// use crossbeam_epoch::{Atomic, Owned};
     ///
     /// let a = Atomic::<i32>::from(Owned::new(1234));
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
     fn from(owned: Owned<T>) -> Self {
         let data = owned.data;
@@ -871,6 +1169,7 @@ impl<T: ?Sized + Pointable> Owned<T> {
     /// let o = Owned::new(1234);
     /// let guard = &epoch::pin();
     /// let p = o.into_shared(guard);
+    /// # unsafe { drop(p.into_owned()); } // avoid leak
     /// ```
     #[allow(clippy::needless_lifetimes)]
     pub fn into_shared<'g>(self, _: &'g Guard) -> Shared<'g, T> {
@@ -1054,8 +1353,8 @@ impl<'g, T> Shared<'g, T> {
     /// let guard = &epoch::pin();
     /// let p = a.load(SeqCst, guard);
     /// assert_eq!(p.as_raw(), raw);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn as_raw(&self) -> *const T {
         let (raw, _) = decompose_tag::<T>(self.data);
         raw as *const _
@@ -1093,8 +1392,8 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
     /// assert!(a.load(SeqCst, guard).is_null());
     /// a.store(Owned::new(1234), SeqCst);
     /// assert!(!a.load(SeqCst, guard).is_null());
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn is_null(&self) -> bool {
         let (raw, _) = decompose_tag::<T>(self.data);
         raw == 0
@@ -1130,9 +1429,8 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
     /// unsafe {
     ///     assert_eq!(p.deref(), &1234);
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    #[allow(clippy::should_implement_trait)]
     pub unsafe fn deref(&self) -> &'g T {
         let (raw, _) = decompose_tag::<T>(self.data);
         T::deref(raw)
@@ -1173,8 +1471,8 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
     /// unsafe {
     ///     assert_eq!(p.deref(), &vec![1, 2, 3, 4, 5]);
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::should_implement_trait)]
     pub unsafe fn deref_mut(&mut self) -> &'g mut T {
         let (raw, _) = decompose_tag::<T>(self.data);
         T::deref_mut(raw)
@@ -1210,8 +1508,8 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
     /// unsafe {
     ///     assert_eq!(p.as_ref(), Some(&1234));
     /// }
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub unsafe fn as_ref(&self) -> Option<&'g T> {
         let (raw, _) = decompose_tag::<T>(self.data);
         if raw == 0 {
@@ -1250,6 +1548,36 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
         Owned::from_usize(self.data)
     }
 
+    /// Takes ownership of the pointee if it is not null.
+    ///
+    /// # Safety
+    ///
+    /// This method may be called only if the pointer is valid and nobody else is holding a
+    /// reference to the same object, or if the pointer is null.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_epoch::{self as epoch, Atomic};
+    /// use std::sync::atomic::Ordering::SeqCst;
+    ///
+    /// let a = Atomic::new(1234);
+    /// unsafe {
+    ///     let guard = &epoch::unprotected();
+    ///     let p = a.load(SeqCst, guard);
+    ///     if let Some(x) = p.try_into_owned() {
+    ///         drop(x);
+    ///     }
+    /// }
+    /// ```
+    pub unsafe fn try_into_owned(self) -> Option<Owned<T>> {
+        if self.is_null() {
+            None
+        } else {
+            Some(Owned::from_usize(self.data))
+        }
+    }
+
     /// Returns the tag stored within the pointer.
     ///
     /// # Examples
@@ -1262,8 +1590,8 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
     /// let guard = &epoch::pin();
     /// let p = a.load(SeqCst, guard);
     /// assert_eq!(p.tag(), 2);
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn tag(&self) -> usize {
         let (_, tag) = decompose_tag::<T>(self.data);
         tag
@@ -1286,8 +1614,8 @@ impl<'g, T: ?Sized + Pointable> Shared<'g, T> {
     /// assert_eq!(p1.tag(), 0);
     /// assert_eq!(p2.tag(), 2);
     /// assert_eq!(p1.as_raw(), p2.as_raw());
+    /// # unsafe { drop(a.into_owned()); } // avoid leak
     /// ```
-    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn with_tag(&self, tag: usize) -> Shared<'g, T> {
         unsafe { Self::from_usize(compose_tag::<T>(self.data, tag)) }
     }
@@ -1307,6 +1635,7 @@ impl<T> From<*const T> for Shared<'_, T> {
     ///
     /// let p = Shared::from(Box::into_raw(Box::new(1234)) as *const _);
     /// assert!(!p.is_null());
+    /// # unsafe { drop(p.into_owned()); } // avoid leak
     /// ```
     fn from(raw: *const T) -> Self {
         let raw = raw as usize;
@@ -1358,9 +1687,10 @@ impl<T: ?Sized + Pointable> Default for Shared<'_, T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(crossbeam_loom)))]
 mod tests {
-    use super::Shared;
+    use super::{Owned, Shared};
+    use std::mem::MaybeUninit;
 
     #[test]
     fn valid_tag_i8() {
@@ -1370,5 +1700,19 @@ mod tests {
     #[test]
     fn valid_tag_i64() {
         Shared::<i64>::null().with_tag(7);
+    }
+
+    #[rustversion::since(1.61)]
+    #[test]
+    fn const_atomic_null() {
+        use super::Atomic;
+        static _U: Atomic<u8> = Atomic::<u8>::null();
+    }
+
+    #[test]
+    fn array_init() {
+        let owned = Owned::<[MaybeUninit<usize>]>::init(10);
+        let arr: &[MaybeUninit<usize>] = &owned;
+        assert_eq!(arr.len(), 10);
     }
 }

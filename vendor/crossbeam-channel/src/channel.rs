@@ -14,6 +14,7 @@ use crate::err::{
 };
 use crate::flavors;
 use crate::select::{Operation, SelectHandle, Token};
+use crate::utils;
 
 /// Creates a channel of unbounded capacity.
 ///
@@ -232,6 +233,8 @@ pub fn at(when: Instant) -> Receiver<Instant> {
 ///
 /// Using a `never` channel to optionally add a timeout to [`select!`]:
 ///
+/// [`select!`]: crate::select!
+///
 /// ```
 /// use std::thread;
 /// use std::time::Duration;
@@ -257,8 +260,6 @@ pub fn at(when: Instant) -> Receiver<Instant> {
 ///     recv(timeout) -> _ => println!("timed out"),
 /// }
 /// ```
-///
-/// [`select!`]: macro.select.html
 pub fn never<T>() -> Receiver<T> {
     Receiver {
         flavor: ReceiverFlavor::Never(flavors::never::Channel::new()),
@@ -299,7 +300,7 @@ pub fn never<T>() -> Receiver<T> {
 /// let ms = |ms| Duration::from_millis(ms);
 ///
 /// // Returns `true` if `a` and `b` are very close `Instant`s.
-/// let eq = |a, b| a + ms(50) > b && b + ms(50) > a;
+/// let eq = |a, b| a + ms(65) > b && b + ms(65) > a;
 ///
 /// let start = Instant::now();
 /// let r = tick(ms(100));
@@ -473,7 +474,7 @@ impl<T> Sender<T> {
     /// );
     /// ```
     pub fn send_timeout(&self, msg: T, timeout: Duration) -> Result<(), SendTimeoutError<T>> {
-        self.send_deadline(msg, Instant::now() + timeout)
+        self.send_deadline(msg, utils::convert_timeout_to_deadline(timeout))
     }
 
     /// Waits for a message to be sent into the channel, but only until a given deadline.
@@ -645,7 +646,7 @@ impl<T> Drop for Sender<T> {
         unsafe {
             match &self.flavor {
                 SenderFlavor::Array(chan) => chan.release(|c| c.disconnect()),
-                SenderFlavor::List(chan) => chan.release(|c| c.disconnect()),
+                SenderFlavor::List(chan) => chan.release(|c| c.disconnect_senders()),
                 SenderFlavor::Zero(chan) => chan.release(|c| c.disconnect()),
             }
         }
@@ -863,7 +864,7 @@ impl<T> Receiver<T> {
     /// );
     /// ```
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
-        self.recv_deadline(Instant::now() + timeout)
+        self.recv_deadline(utils::convert_timeout_to_deadline(timeout))
     }
 
     /// Waits for a message to be received from the channel, but only before a given deadline.
@@ -1137,7 +1138,7 @@ impl<T> Drop for Receiver<T> {
         unsafe {
             match &self.flavor {
                 ReceiverFlavor::Array(chan) => chan.release(|c| c.disconnect()),
-                ReceiverFlavor::List(chan) => chan.release(|c| c.disconnect()),
+                ReceiverFlavor::List(chan) => chan.release(|c| c.disconnect_receivers()),
                 ReceiverFlavor::Zero(chan) => chan.release(|c| c.disconnect()),
                 ReceiverFlavor::At(_) => {}
                 ReceiverFlavor::Tick(_) => {}
@@ -1485,7 +1486,7 @@ impl<T> SelectHandle for Receiver<T> {
 }
 
 /// Writes a message into the channel.
-pub unsafe fn write<T>(s: &Sender<T>, token: &mut Token, msg: T) -> Result<(), T> {
+pub(crate) unsafe fn write<T>(s: &Sender<T>, token: &mut Token, msg: T) -> Result<(), T> {
     match &s.flavor {
         SenderFlavor::Array(chan) => chan.write(token, msg),
         SenderFlavor::List(chan) => chan.write(token, msg),
@@ -1494,7 +1495,7 @@ pub unsafe fn write<T>(s: &Sender<T>, token: &mut Token, msg: T) -> Result<(), T
 }
 
 /// Reads a message from the channel.
-pub unsafe fn read<T>(r: &Receiver<T>, token: &mut Token) -> Result<T, ()> {
+pub(crate) unsafe fn read<T>(r: &Receiver<T>, token: &mut Token) -> Result<T, ()> {
     match &r.flavor {
         ReceiverFlavor::Array(chan) => chan.read(token),
         ReceiverFlavor::List(chan) => chan.read(token),

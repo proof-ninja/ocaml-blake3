@@ -2,6 +2,16 @@
 
 Entries are listed in reverse chronological order.
 
+## 2.4.1
+
+* Fix a bug in how the README was included in the documentation builds
+  which caused nightly builds to break.
+
+## 2.4.0
+
+* Add new `ConstantTimeGreater` and `ConstantTimeLess` traits, as well
+  as implementations for unsigned integers, by @isislovecruft.
+
 ## 2.3.0
 
 * Add `impl ConstantTimeEq for Choice` by @tarcieri.

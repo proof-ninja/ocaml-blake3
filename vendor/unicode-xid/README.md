@@ -3,7 +3,7 @@
 Determine if a `char` is a valid identifier for a parser and/or lexer according to
 [Unicode Standard Annex #31](http://www.unicode.org/reports/tr31/) rules.
 
-[![Build Status](https://travis-ci.org/unicode-rs/unicode-xid.svg)](https://travis-ci.org/unicode-rs/unicode-xid)
+[![Build Status](https://img.shields.io/github/workflow/status/unicode-rs/unicode-xid/CI/master)](https://github.com/unicode-rs/unicode-xid/actions?query=branch%3Amaster)
 
 [Documentation](https://unicode-rs.github.io/unicode-xid/unicode_xid/index.html)
 
@@ -25,6 +25,15 @@ on std, and instead uses equivalent functions from core.
 
 
 # changelog
+
+## 0.2.2
+
+- Add an ASCII fast-path
+
+## 0.2.1
+
+- Update to Unicode 13.0.0
+- Speed up lookup
 
 ## 0.2.0
 

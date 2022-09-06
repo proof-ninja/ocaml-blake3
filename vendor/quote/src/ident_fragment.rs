@@ -1,6 +1,6 @@
+use core::fmt;
 use proc_macro2::{Ident, Span};
 use std::borrow::Cow;
-use std::fmt;
 
 /// Specialized formatting trait used by `format_ident!`.
 ///
@@ -79,7 +79,7 @@ macro_rules! ident_fragment_display {
                 }
             }
         )*
-    }
+    };
 }
 
 ident_fragment_display!(bool, str, String, char);

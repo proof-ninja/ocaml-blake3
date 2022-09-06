@@ -41,32 +41,33 @@ fn len_empty_full() {
     let (s, r) = unbounded();
 
     assert_eq!(s.len(), 0);
-    assert_eq!(s.is_empty(), true);
-    assert_eq!(s.is_full(), false);
+    assert!(s.is_empty());
+    assert!(!s.is_full());
     assert_eq!(r.len(), 0);
-    assert_eq!(r.is_empty(), true);
-    assert_eq!(r.is_full(), false);
+    assert!(r.is_empty());
+    assert!(!r.is_full());
 
     s.send(()).unwrap();
 
     assert_eq!(s.len(), 1);
-    assert_eq!(s.is_empty(), false);
-    assert_eq!(s.is_full(), false);
+    assert!(!s.is_empty());
+    assert!(!s.is_full());
     assert_eq!(r.len(), 1);
-    assert_eq!(r.is_empty(), false);
-    assert_eq!(r.is_full(), false);
+    assert!(!r.is_empty());
+    assert!(!r.is_full());
 
     r.recv().unwrap();
 
     assert_eq!(s.len(), 0);
-    assert_eq!(s.is_empty(), true);
-    assert_eq!(s.is_full(), false);
+    assert!(s.is_empty());
+    assert!(!s.is_full());
     assert_eq!(r.len(), 0);
-    assert_eq!(r.is_empty(), true);
-    assert_eq!(r.is_full(), false);
+    assert!(r.is_empty());
+    assert!(!r.is_full());
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // this test makes timing assumptions, but Miri is so slow it violates them
 fn try_recv() {
     let (s, r) = unbounded();
 
@@ -132,8 +133,13 @@ fn recv_timeout() {
 
 #[test]
 fn try_send() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
+    const COUNT: usize = 1000;
+
     let (s, r) = unbounded();
-    for i in 0..1000 {
+    for i in 0..COUNT {
         assert_eq!(s.try_send(i), Ok(()));
     }
 
@@ -143,8 +149,13 @@ fn try_send() {
 
 #[test]
 fn send() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
+    const COUNT: usize = 1000;
+
     let (s, r) = unbounded();
-    for i in 0..1000 {
+    for i in 0..COUNT {
         assert_eq!(s.send(i), Ok(()));
     }
 
@@ -154,8 +165,13 @@ fn send() {
 
 #[test]
 fn send_timeout() {
+    #[cfg(miri)]
+    const COUNT: usize = 50;
+    #[cfg(not(miri))]
+    const COUNT: usize = 1000;
+
     let (s, r) = unbounded();
-    for i in 0..1000 {
+    for i in 0..COUNT {
         assert_eq!(s.send_timeout(i, ms(i as u64)), Ok(()));
     }
 
@@ -239,6 +255,9 @@ fn disconnect_wakes_receiver() {
 
 #[test]
 fn spsc() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 100_000;
 
     let (s, r) = unbounded();
@@ -261,6 +280,9 @@ fn spsc() {
 
 #[test]
 fn mpmc() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 25_000;
     const THREADS: usize = 4;
 
@@ -295,6 +317,9 @@ fn mpmc() {
 
 #[test]
 fn stress_oneshot() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 10_000;
 
     for _ in 0..COUNT {
@@ -310,6 +335,9 @@ fn stress_oneshot() {
 
 #[test]
 fn stress_iter() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 100_000;
 
     let (request_s, request_r) = unbounded();
@@ -373,6 +401,15 @@ fn stress_timeout_two_threads() {
 
 #[test]
 fn drops() {
+    #[cfg(miri)]
+    const RUNS: usize = 20;
+    #[cfg(not(miri))]
+    const RUNS: usize = 100;
+    #[cfg(miri)]
+    const STEPS: usize = 100;
+    #[cfg(not(miri))]
+    const STEPS: usize = 10_000;
+
     static DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[derive(Debug, PartialEq)]
@@ -386,9 +423,9 @@ fn drops() {
 
     let mut rng = thread_rng();
 
-    for _ in 0..100 {
-        let steps = rng.gen_range(0, 10_000);
-        let additional = rng.gen_range(0, 1000);
+    for _ in 0..RUNS {
+        let steps = rng.gen_range(0..STEPS);
+        let additional = rng.gen_range(0..STEPS / 10);
 
         DROPS.store(0, Ordering::SeqCst);
         let (s, r) = unbounded::<DropCounter>();
@@ -421,6 +458,9 @@ fn drops() {
 
 #[test]
 fn linearizable() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 25_000;
     const THREADS: usize = 4;
 
@@ -441,6 +481,9 @@ fn linearizable() {
 
 #[test]
 fn fairness() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 10_000;
 
     let (s1, r1) = unbounded::<()>();
@@ -463,6 +506,9 @@ fn fairness() {
 
 #[test]
 fn fairness_duplicates() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 10_000;
 
     let (s, r) = unbounded();
@@ -496,6 +542,9 @@ fn recv_in_send() {
 
 #[test]
 fn channel_through_channel() {
+    #[cfg(miri)]
+    const COUNT: usize = 100;
+    #[cfg(not(miri))]
     const COUNT: usize = 1000;
 
     type T = Box<dyn Any + Send>;

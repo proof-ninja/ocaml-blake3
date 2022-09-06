@@ -1,4 +1,4 @@
-use crate::{FromValue, ToValue, Value};
+use crate::{FromValue, IntoValue, Runtime, Value};
 
 /// Errors that are translated directly into OCaml exceptions
 #[derive(Debug)]
@@ -19,7 +19,7 @@ pub enum CamlError {
     StackOverflow,
 
     /// Sys_error
-    SysError(&'static str),
+    SysError(Value),
 
     /// End_of_file
     EndOfFile,
@@ -82,7 +82,7 @@ impl Error {
     /// Raise an exception that has been registered using `Callback.register_exception` with no
     /// arguments
     pub fn raise<S: AsRef<str>>(exc: S) -> Result<(), Error> {
-        let value = match Value::named(exc.as_ref()) {
+        let value = match unsafe { Value::named(exc.as_ref()) } {
             Some(v) => v,
             None => {
                 return Err(Error::Message(
@@ -95,8 +95,8 @@ impl Error {
 
     /// Raise an exception that has been registered using `Callback.register_exception` with an
     /// argument
-    pub fn raise_with_arg<S: AsRef<str>, T: ToValue>(exc: S, arg: T) -> Result<(), Error> {
-        let value = match Value::named(exc.as_ref()) {
+    pub fn raise_with_arg<S: AsRef<str>>(exc: S, arg: Value) -> Result<(), Error> {
+        let value = match unsafe { Value::named(exc.as_ref()) } {
             Some(v) => v,
             None => {
                 return Err(Error::Message(
@@ -105,7 +105,7 @@ impl Error {
             }
         };
 
-        Err(CamlError::WithArg(value, arg.to_value()).into())
+        Err(CamlError::WithArg(value, arg).into())
     }
 
     /// Raise `Not_found`
@@ -130,9 +130,11 @@ impl Error {
 
     #[doc(hidden)]
     pub fn raise_failure(s: &str) -> ! {
-        let s = s.to_value();
         unsafe {
-            crate::sys::caml_failwith_value(s.0);
+            let value = crate::sys::caml_alloc_string(s.len());
+            let ptr = crate::sys::string_val(value);
+            core::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
+            crate::sys::caml_failwith_value(value);
         }
         #[allow(clippy::empty_loop)]
         loop {}
@@ -140,9 +142,11 @@ impl Error {
 
     #[doc(hidden)]
     pub fn raise_value(v: Value, s: &str) -> ! {
-        let s = s.to_value();
         unsafe {
-            crate::sys::caml_raise_with_arg(v.0, s.0);
+            let st = crate::sys::caml_alloc_string(s.len());
+            let ptr = crate::sys::string_val(st);
+            core::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
+            crate::sys::caml_raise_with_arg(v.raw().0, st);
         }
         #[allow(clippy::empty_loop)]
         loop {}
@@ -150,29 +154,29 @@ impl Error {
 
     /// Get named error registered using `Callback.register_exception`
     pub fn named<S: AsRef<str>>(s: S) -> Option<Value> {
-        Value::named(s.as_ref())
+        unsafe { Value::named(s.as_ref()) }
     }
 }
 
 #[cfg(not(feature = "no-std"))]
-unsafe impl<T: ToValue, E: 'static + std::error::Error> ToValue for Result<T, E> {
-    fn to_value(self) -> Value {
+unsafe impl<T: IntoValue, E: 'static + std::error::Error> IntoValue for Result<T, E> {
+    fn into_value(self, rt: &Runtime) -> Value {
         match self {
-            Ok(x) => x.to_value(),
+            Ok(x) => x.into_value(rt),
             Err(y) => {
                 let e: Result<T, Error> = Err(Error::Error(Box::new(y)));
-                e.to_value()
+                e.into_value(rt)
             }
         }
     }
 }
 
-unsafe impl<T: ToValue> ToValue for Result<T, Error> {
-    fn to_value(self) -> Value {
+unsafe impl<T: IntoValue> IntoValue for Result<T, Error> {
+    fn into_value(self, rt: &Runtime) -> Value {
         match self {
-            Ok(x) => return x.to_value(),
+            Ok(x) => return x.into_value(rt),
             Err(Error::Caml(CamlError::Exception(e))) => unsafe {
-                crate::sys::caml_raise(e.0);
+                crate::sys::caml_raise(e.raw().0);
             },
             Err(Error::Caml(CamlError::NotFound)) => unsafe {
                 crate::sys::caml_raise_not_found();
@@ -202,13 +206,10 @@ unsafe impl<T: ToValue> ToValue for Result<T, Error> {
                 };
             }
             Err(Error::Caml(CamlError::WithArg(a, b))) => unsafe {
-                crate::sys::caml_raise_with_arg(a.0, b.0)
+                crate::sys::caml_raise_with_arg(a.raw().0, b.raw().0)
             },
             Err(Error::Caml(CamlError::SysError(s))) => {
-                unsafe {
-                    let s = s.to_value();
-                    crate::sys::caml_raise_sys_error(s.0)
-                };
+                unsafe { crate::sys::caml_raise_sys_error(s.raw().0) };
             }
             Err(Error::Message(s)) => {
                 unsafe {
@@ -237,16 +238,18 @@ unsafe impl<T: ToValue> ToValue for Result<T, Error> {
             }
         };
 
-        Value::unit()
+        unreachable!()
     }
 }
 
-unsafe impl<T: FromValue> FromValue for Result<T, crate::Error> {
+unsafe impl<'a, T: FromValue<'a>> FromValue<'a> for Result<T, crate::Error> {
     fn from_value(value: Value) -> Result<T, crate::Error> {
-        if value.is_exception_result() {
-            return Err(CamlError::Exception(value.exception().unwrap()).into());
-        }
+        unsafe {
+            if value.is_exception_result() {
+                return Err(CamlError::Exception(value).into());
+            }
 
-        Ok(T::from_value(value))
+            Ok(T::from_value(value))
+        }
     }
 }

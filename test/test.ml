@@ -49,7 +49,7 @@ let blake2 hash_size inbuf =
   let open Hacl_star in
   let key = Bytes.create 0 in
   let outbuf = Bytes.create hash_size in
-  Hacl.Blake2b_32.hash key inbuf outbuf;
+  Hacl.Blake2b_32.Noalloc.hash ~key ~msg:inbuf ~digest:outbuf;
   Bytes.unsafe_to_string outbuf
 
 (* compare with b3sum *)

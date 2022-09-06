@@ -19,14 +19,16 @@ use crate::utils;
 /// `read` or `write`.
 ///
 /// Each field contains data associated with a specific channel flavor.
+// This is a private API that is used by the select macro.
 #[derive(Debug, Default)]
 pub struct Token {
-    pub at: flavors::at::AtToken,
-    pub array: flavors::array::ArrayToken,
-    pub list: flavors::list::ListToken,
-    pub never: flavors::never::NeverToken,
-    pub tick: flavors::tick::TickToken,
-    pub zero: flavors::zero::ZeroToken,
+    pub(crate) at: flavors::at::AtToken,
+    pub(crate) array: flavors::array::ArrayToken,
+    pub(crate) list: flavors::list::ListToken,
+    #[allow(dead_code)]
+    pub(crate) never: flavors::never::NeverToken,
+    pub(crate) tick: flavors::tick::TickToken,
+    pub(crate) zero: flavors::zero::ZeroToken,
 }
 
 /// Identifier associated with an operation by a specific thread on a specific channel.
@@ -93,6 +95,7 @@ impl Into<usize> for Selected {
 ///
 /// This is a handle that assists select in executing an operation, registration, deciding on the
 /// appropriate deadline for blocking, etc.
+// This is a private API (exposed inside crossbeam_channel::internal module) that is used by the select macro.
 pub trait SelectHandle {
     /// Attempts to select an operation and returns `true` on success.
     fn try_select(&self, token: &mut Token) -> bool;
@@ -442,6 +445,7 @@ fn run_ready(
 }
 
 /// Attempts to select one of the operations without blocking.
+// This is a private API (exposed inside crossbeam_channel::internal module) that is used by the select macro.
 #[inline]
 pub fn try_select<'a>(
     handles: &mut [(&'a dyn SelectHandle, usize, *const u8)],
@@ -458,6 +462,7 @@ pub fn try_select<'a>(
 }
 
 /// Blocks until one of the operations becomes ready and selects it.
+// This is a private API (exposed inside crossbeam_channel::internal module) that is used by the select macro.
 #[inline]
 pub fn select<'a>(
     handles: &mut [(&'a dyn SelectHandle, usize, *const u8)],
@@ -476,17 +481,18 @@ pub fn select<'a>(
 }
 
 /// Blocks for a limited time until one of the operations becomes ready and selects it.
+// This is a private API (exposed inside crossbeam_channel::internal module) that is used by the select macro.
 #[inline]
 pub fn select_timeout<'a>(
     handles: &mut [(&'a dyn SelectHandle, usize, *const u8)],
     timeout: Duration,
 ) -> Result<SelectedOperation<'a>, SelectTimeoutError> {
-    select_deadline(handles, Instant::now() + timeout)
+    select_deadline(handles, utils::convert_timeout_to_deadline(timeout))
 }
 
 /// Blocks until a given deadline, or until one of the operations becomes ready and selects it.
 #[inline]
-pub fn select_deadline<'a>(
+pub(crate) fn select_deadline<'a>(
     handles: &mut [(&'a dyn SelectHandle, usize, *const u8)],
     deadline: Instant,
 ) -> Result<SelectedOperation<'a>, SelectTimeoutError> {
@@ -512,6 +518,8 @@ pub fn select_deadline<'a>(
 ///
 /// The [`select!`] macro is a convenience wrapper around `Select`. However, it cannot select over a
 /// dynamically created list of channel operations.
+///
+/// [`select!`]: crate::select!
 ///
 /// Once a list of operations has been built with `Select`, there are two different ways of
 /// proceeding:
@@ -864,9 +872,6 @@ impl<'a> Select<'a> {
     /// The selected operation must be completed with [`SelectedOperation::send`]
     /// or [`SelectedOperation::recv`].
     ///
-    /// [`SelectedOperation::send`]: struct.SelectedOperation.html#method.send
-    /// [`SelectedOperation::recv`]: struct.SelectedOperation.html#method.recv
-    ///
     /// # Examples
     ///
     /// ```
@@ -1040,7 +1045,7 @@ impl<'a> Select<'a> {
     /// }
     /// ```
     pub fn ready_timeout(&mut self, timeout: Duration) -> Result<usize, ReadyTimeoutError> {
-        self.ready_deadline(Instant::now() + timeout)
+        self.ready_deadline(utils::convert_timeout_to_deadline(timeout))
     }
 
     /// Blocks until a given deadline, or until one of the operations becomes ready.

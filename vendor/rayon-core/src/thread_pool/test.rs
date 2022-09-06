@@ -28,7 +28,7 @@ fn workers_stop() {
             // do some work on these threads
             join_a_lot(22);
 
-            thread_pool.registry.clone()
+            Arc::clone(&thread_pool.registry)
         });
         assert_eq!(registry.num_threads(), 22);
     }
@@ -53,7 +53,7 @@ fn sleeper_stop() {
     {
         // once we exit this block, thread-pool will be dropped
         let thread_pool = ThreadPoolBuilder::new().num_threads(22).build().unwrap();
-        registry = thread_pool.registry.clone();
+        registry = Arc::clone(&thread_pool.registry);
 
         // Give time for at least some of the thread pool to fall asleep.
         thread::sleep(time::Duration::from_secs(1));
@@ -67,7 +67,7 @@ fn sleeper_stop() {
 /// Creates a start/exit handler that increments an atomic counter.
 fn count_handler() -> (Arc<AtomicUsize>, impl Fn(usize)) {
     let count = Arc::new(AtomicUsize::new(0));
-    (count.clone(), move |_| {
+    (Arc::clone(&count), move |_| {
         count.fetch_add(1, Ordering::SeqCst);
     })
 }
@@ -335,4 +335,34 @@ fn nested_fifo_scopes() {
         }
     });
     assert_eq!(counter.into_inner(), pools.len());
+}
+
+#[test]
+fn in_place_scope_no_deadlock() {
+    let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let (tx, rx) = channel();
+    let rx_ref = &rx;
+    pool.in_place_scope(move |s| {
+        // With regular scopes this closure would never run because this scope op
+        // itself would block the only worker thread.
+        s.spawn(move |_| {
+            tx.send(()).unwrap();
+        });
+        rx_ref.recv().unwrap();
+    });
+}
+
+#[test]
+fn in_place_scope_fifo_no_deadlock() {
+    let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let (tx, rx) = channel();
+    let rx_ref = &rx;
+    pool.in_place_scope_fifo(move |s| {
+        // With regular scopes this closure would never run because this scope op
+        // itself would block the only worker thread.
+        s.spawn_fifo(move |_| {
+            tx.send(()).unwrap();
+        });
+        rx_ref.recv().unwrap();
+    });
 }

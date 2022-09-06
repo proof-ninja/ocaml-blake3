@@ -23,10 +23,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// [`compile_error!`] in the generated code. This produces a better diagnostic
 /// message than simply panicking the macro.
 ///
-/// [`compile_error!`]: https://doc.rust-lang.org/std/macro.compile_error.html
+/// [`compile_error!`]: std::compile_error!
 ///
 /// When parsing macro input, the [`parse_macro_input!`] macro handles the
 /// conversion to `compile_error!` automatically.
+///
+/// [`parse_macro_input!`]: crate::parse_macro_input!
 ///
 /// ```
 /// # extern crate proc_macro;
@@ -47,10 +49,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// ```
 ///
 /// For errors that arise later than the initial parsing stage, the
-/// [`.to_compile_error()`] method can be used to perform an explicit conversion
-/// to `compile_error!`.
+/// [`.to_compile_error()`] or [`.into_compile_error()`] methods can be used to
+/// perform an explicit conversion to `compile_error!`.
 ///
 /// [`.to_compile_error()`]: Error::to_compile_error
+/// [`.into_compile_error()`]: Error::into_compile_error
 ///
 /// ```
 /// # extern crate proc_macro;
@@ -66,7 +69,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 ///     // fn(DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 ///     expand::my_derive(input)
-///         .unwrap_or_else(|err| err.to_compile_error())
+///         .unwrap_or_else(syn::Error::into_compile_error)
 ///         .into()
 /// }
 /// #
@@ -189,7 +192,8 @@ impl Error {
     /// The [`parse_macro_input!`] macro provides a convenient way to invoke
     /// this method correctly in a procedural macro.
     ///
-    /// [`compile_error!`]: https://doc.rust-lang.org/std/macro.compile_error.html
+    /// [`compile_error!`]: std::compile_error!
+    /// [`parse_macro_input!`]: crate::parse_macro_input!
     pub fn to_compile_error(&self) -> TokenStream {
         self.messages
             .iter()
@@ -197,10 +201,46 @@ impl Error {
             .collect()
     }
 
+    /// Render the error as an invocation of [`compile_error!`].
+    ///
+    /// [`compile_error!`]: std::compile_error!
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # extern crate proc_macro;
+    /// #
+    /// use proc_macro::TokenStream;
+    /// use syn::{parse_macro_input, DeriveInput, Error};
+    ///
+    /// # const _: &str = stringify! {
+    /// #[proc_macro_derive(MyTrait)]
+    /// # };
+    /// pub fn derive_my_trait(input: TokenStream) -> TokenStream {
+    ///     let input = parse_macro_input!(input as DeriveInput);
+    ///     my_trait::expand(input)
+    ///         .unwrap_or_else(Error::into_compile_error)
+    ///         .into()
+    /// }
+    ///
+    /// mod my_trait {
+    ///     use proc_macro2::TokenStream;
+    ///     use syn::{DeriveInput, Result};
+    ///
+    ///     pub(crate) fn expand(input: DeriveInput) -> Result<TokenStream> {
+    ///         /* ... */
+    ///         # unimplemented!()
+    ///     }
+    /// }
+    /// ```
+    pub fn into_compile_error(self) -> TokenStream {
+        self.to_compile_error()
+    }
+
     /// Add another error message to self such that when `to_compile_error()` is
     /// called, both errors will be emitted together.
     pub fn combine(&mut self, another: Error) {
-        self.messages.extend(another.messages)
+        self.messages.extend(another.messages);
     }
 }
 
@@ -309,15 +349,11 @@ impl Clone for ErrorMessage {
     }
 }
 
-impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        "parse error"
-    }
-}
+impl std::error::Error for Error {}
 
 impl From<LexError> for Error {
     fn from(err: LexError) -> Self {
-        Error::new(Span::call_site(), format!("{:?}", err))
+        Error::new(err.span(), "lex error")
     }
 }
 
